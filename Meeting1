@@ -1,0 +1,34 @@
+ Project Overview
+
+We initially proposed a Portfolio Management System to our customer to provide users with a simple and centralized way to manage their investments and track portfolio performance.
+
+After discussing the requirements with the customer, the proposed features were refined and Risk Analysis was added as an important part of the project. The final system will therefore not only manage holdings and display performance but also help users understand their portfolio's risk and diversification.
+
+The website will consist of three main sections: Holdings, Dashboard, and Performance, with Risk Analysis integrated into the Dashboard.
+
+Holdings
+
+- View all investments
+- Add and remove holdings
+- Search/sort holdings
+- Display quantity, current value, gain/loss, etc.
+
+ Dashboard
+
+- Total portfolio value
+- Total and daily return
+- Portfolio value-over-time graph
+- Sector-wise allocation pie chart
+- Risk Analysis including volatility, maximum drawdown, and concentration risk
+
+ Performance
+
+- Individual company returns
+- Top and worst performers
+- Performance comparison graph of all companies
+
+In simple terms:
+
+Holdings → What do I own?
+Dashboard → How is my overall portfolio performing and how risky is it?
+Performance → Which investments are performing best or worst?
