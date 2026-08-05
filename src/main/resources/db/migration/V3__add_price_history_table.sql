@@ -9,4 +9,6 @@ CREATE TABLE IF NOT EXISTS price_history (
     volume BIGINT,
     UNIQUE KEY uq_price_instrument_date (instrument_id, price_date),
     CONSTRAINT fk_price_instrument FOREIGN KEY (instrument_id) REFERENCES instrument(instrument_id) ON DELETE CASCADE
+
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
