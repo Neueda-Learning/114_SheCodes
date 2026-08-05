@@ -91,7 +91,9 @@ public class HoldingServiceImpl implements HoldingService {
 
     private HoldingResponse convertToResponse(Holding holding) {
 
-        String ticker = holding.getInstrument().getTicker();
+                Instrument instrument = holding.getInstrument();
+                String ticker = instrument.getTicker();
+                String assetClass = instrument.getAssetClass() == null ? null : instrument.getAssetClass().name();
 
         BigDecimal currentPrice =
                                 getCurrentPriceOrThrow(ticker);
@@ -101,6 +103,18 @@ public class HoldingServiceImpl implements HoldingService {
                 currentPrice.multiply(
                         holding.getQuantity()
                 );
+
+        BigDecimal investedAmount =
+                holding.getAvgCost().multiply(holding.getQuantity());
+
+        BigDecimal gainLossAmount = currentValue.subtract(investedAmount);
+
+        BigDecimal gainLossPercentage =
+                investedAmount.compareTo(BigDecimal.ZERO) == 0
+                        ? BigDecimal.ZERO
+                        : gainLossAmount
+                        .multiply(BigDecimal.valueOf(100))
+                        .divide(investedAmount, 6, RoundingMode.HALF_UP);
 
 
         return new HoldingResponse(
@@ -119,7 +133,21 @@ public class HoldingServiceImpl implements HoldingService {
 
                 currentPrice,
 
-                currentValue
+                                currentValue,
+
+                                instrument.getName(),
+
+                                assetClass,
+
+                                instrument.getExchange(),
+
+                                instrument.getCurrency(),
+
+                                investedAmount,
+
+                                gainLossAmount,
+
+                                gainLossPercentage
         );
     }
 

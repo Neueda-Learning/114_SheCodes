@@ -18,7 +18,21 @@ public record HoldingResponse(
 
         BigDecimal currentPrice,
 
-        BigDecimal currentValue
+        BigDecimal currentValue,
+
+        String instrumentName,
+
+        String assetClass,
+
+        String exchange,
+
+        String currency,
+
+        BigDecimal investedAmount,
+
+        BigDecimal gainLossAmount,
+
+        BigDecimal gainLossPercentage
 
 ) {
 }
