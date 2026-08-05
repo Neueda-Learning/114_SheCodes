@@ -14,6 +14,9 @@ import java.math.BigDecimal;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -74,6 +77,19 @@ public class YahooFinanceService {
     }
 
 
+    public Map<LocalDate, BigDecimal> getHistoricalClosePrices(String symbol, int days) {
+        String normalizedSymbol = symbol.toUpperCase(Locale.ROOT);
+        String range = toYahooRange(days);
+        String url = "https://query1.finance.yahoo.com/v8/finance/chart/"
+                + normalizedSymbol
+                + "?range=" + range
+                + "&interval=1d";
+
+        String response = fetchYahooResponse(url);
+        return extractHistoricalCloses(normalizedSymbol, response);
+    }
+
+
     private String fetchYahooResponse(String url) {
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.USER_AGENT, "Mozilla/5.0");
@@ -115,6 +131,66 @@ public class YahooFinanceService {
                     exception
             );
         }
+    }
+
+
+    private Map<LocalDate, BigDecimal> extractHistoricalCloses(String normalizedSymbol, String response) {
+        if (response == null || response.isBlank()) {
+            throw new IllegalStateException("Empty historical response from Yahoo Finance for symbol: " + normalizedSymbol);
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode result = root.path("chart").path("result").path(0);
+            JsonNode timestamps = result.path("timestamp");
+            JsonNode closes = result.path("indicators").path("quote").path(0).path("close");
+
+            if (!timestamps.isArray() || !closes.isArray()) {
+                throw new IllegalStateException("Historical price series not found for symbol: " + normalizedSymbol);
+            }
+
+            int length = Math.min(timestamps.size(), closes.size());
+            Map<LocalDate, BigDecimal> history = new LinkedHashMap<>();
+
+            for (int i = 0; i < length; i++) {
+                JsonNode timestampNode = timestamps.get(i);
+                JsonNode closeNode = closes.get(i);
+
+                if (timestampNode == null || closeNode == null || closeNode.isNull()) {
+                    continue;
+                }
+
+                long epochSeconds = timestampNode.asLong();
+                LocalDate date = Instant.ofEpochSecond(epochSeconds)
+                        .atZone(ZoneOffset.UTC)
+                        .toLocalDate();
+                history.put(date, closeNode.decimalValue());
+            }
+
+            return history;
+        } catch (IOException exception) {
+            throw new IllegalStateException(
+                    "Unable to parse Yahoo Finance historical response for symbol: " + normalizedSymbol,
+                    exception
+            );
+        }
+    }
+
+
+    private String toYahooRange(int days) {
+        if (days <= 7) {
+            return "1mo";
+        }
+        if (days <= 30) {
+            return "3mo";
+        }
+        if (days <= 90) {
+            return "6mo";
+        }
+        if (days <= 180) {
+            return "1y";
+        }
+        return "2y";
     }
 
 
