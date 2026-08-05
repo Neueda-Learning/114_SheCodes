@@ -3,6 +3,7 @@ package com.example.Portfolio_Manager.Sevice;
 
 import com.example.Portfolio_Manager.dto.AddHoldingRequest;
 import com.example.Portfolio_Manager.dto.HoldingResponse;
+import com.example.Portfolio_Manager.dto.UpdateHoldingQuantityRequest;
 import com.example.Portfolio_Manager.Model.Holding;
 import com.example.Portfolio_Manager.Model.Instrument;
 import com.example.Portfolio_Manager.Model.Portfolio;
@@ -10,6 +11,9 @@ import com.example.Portfolio_Manager.Repository.HoldingRepository;
 import com.example.Portfolio_Manager.Repository.InstrumentRepository;
 import com.example.Portfolio_Manager.Repository.PortfolioRepository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,9 +22,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.List;
-
-
 @Service
 public class HoldingServiceImpl implements HoldingService {
 
@@ -51,16 +52,38 @@ public class HoldingServiceImpl implements HoldingService {
 
 
     @Override
-    public List<HoldingResponse> getHoldings(Long portfolioId) {
+    public Page<HoldingResponse> getHoldings(Long portfolioId, int page, int size) {
 
+        if (!portfolioRepository.existsById(portfolioId)) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Portfolio not found: " + portfolioId
+            );
+        }
 
-        List<Holding> holdings =
-                holdingRepository.findByPortfolio_PortfolioId(portfolioId);
+        if (page < 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "page must be 0 or greater"
+            );
+        }
 
+        if (size <= 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "size must be greater than 0"
+            );
+        }
 
-        return holdings.stream()
-                .map(this::convertToResponse)
-                .toList();
+        PageRequest pageRequest = PageRequest.of(
+                page,
+                size,
+                Sort.by(Sort.Direction.ASC, "holdingId")
+        );
+
+        return holdingRepository
+                .findByPortfolio_PortfolioId(portfolioId, pageRequest)
+                .map(this::convertToResponse);
 
     }
 
@@ -158,6 +181,27 @@ public class HoldingServiceImpl implements HoldingService {
 
         Holding savedHolding = holdingRepository.save(holding);
 
+        return convertToResponse(savedHolding);
+    }
+
+
+
+    @Override
+    @Transactional
+    public HoldingResponse updateHoldingQuantity(
+            Long holdingId,
+            UpdateHoldingQuantityRequest request
+    ) {
+
+        Holding holding = holdingRepository.findById(holdingId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Holding not found: " + holdingId
+                ));
+
+        holding.setQuantity(request.getQuantity());
+
+        Holding savedHolding = holdingRepository.save(holding);
         return convertToResponse(savedHolding);
     }
 
