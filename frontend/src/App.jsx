@@ -4,15 +4,19 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BrainCircuit,
+  Check,
   BriefcaseBusiness,
   CandlestickChart,
   Download,
   LoaderCircle,
+  Pencil,
   RefreshCcw,
   Search,
   ShieldAlert,
   Sparkles,
   Trash2,
+  Upload,
+  X,
 } from 'lucide-react'
 import {
   Area,
@@ -32,6 +36,7 @@ import { demoSnapshot } from './data/demoPortfolio'
 import {
   addHolding,
   deleteHolding,
+  getHoldingsPage,
   getPerformanceHoldings,
   getPerformanceSummary,
   getPerformanceTopWorstHistory,
@@ -40,6 +45,7 @@ import {
   getRiskMaxDrawdown,
   getRiskVolatility,
   refreshPortfolioPrices,
+  updateHoldingQuantity,
 } from './lib/api'
 import {
   buildAssetClassAllocation,
@@ -55,11 +61,78 @@ import {
   formatDateLabel,
   formatPercent,
   formatQuantity,
+  formatSignedCurrency,
+  formatSignedPercent,
   mapFrameToPerformanceRange,
   performanceFrames,
   tabs,
   toNumber,
 } from './lib/portfolio'
+
+function parseCsvLine(line) {
+  const values = []
+  let current = ''
+  let inQuotes = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim())
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  values.push(current.trim())
+  return values
+}
+
+function parseHoldingsCsv(text) {
+  const rows = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  if (rows.length < 2) {
+    throw new Error('CSV must include a header row and at least one holding row.')
+  }
+
+  const headers = parseCsvLine(rows[0]).map((header) => header.toLowerCase().replace(/\s+/g, ''))
+  const instrumentIdIndex = headers.findIndex((header) => header === 'instrumentid' || header === 'instrument')
+  const tickerIndex = headers.findIndex((header) => header === 'ticker' || header === 'symbol')
+  const quantityIndex = headers.findIndex((header) => header === 'quantity' || header === 'qty' || header === 'units')
+
+  if (quantityIndex === -1) {
+    throw new Error('CSV requires a quantity column (quantity/qty/units).')
+  }
+
+  if (instrumentIdIndex === -1 && tickerIndex === -1) {
+    throw new Error('CSV requires either instrumentId/instrument or ticker/symbol column.')
+  }
+
+  return rows.slice(1).map((line, rowIndex) => {
+    const values = parseCsvLine(line)
+    return {
+      lineNumber: rowIndex + 2,
+      instrumentIdRaw: instrumentIdIndex >= 0 ? values[instrumentIdIndex] : '',
+      tickerRaw: tickerIndex >= 0 ? values[tickerIndex] : '',
+      quantityRaw: values[quantityIndex],
+    }
+  })
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -84,6 +157,9 @@ function App() {
   const [actionState, setActionState] = useState({
     refreshing: false,
     deletingId: null,
+    updatingId: null,
+    importing: false,
+    exporting: false,
     error: '',
   })
   const [toastState, setToastState] = useState({
@@ -92,11 +168,22 @@ function App() {
     type: 'success',
   })
   const toastTimeoutRef = useRef(null)
+  const csvInputRef = useRef(null)
+  const holdingsRequestRef = useRef(0)
+  const [liveAnnouncement, setLiveAnnouncement] = useState('')
   const [formState, setFormState] = useState({
     instrumentId: '',
     quantity: '',
     submitting: false,
     error: '',
+  })
+  const [holdingsPage, setHoldingsPage] = useState(1)
+  const [holdingsPageSize, setHoldingsPageSize] = useState(10)
+  const [holdingsPageState, setHoldingsPageState] = useState({
+    items: [],
+    totalPages: 1,
+    totalItems: 0,
+    loading: false,
   })
 
   function logCustomerAction(action, details = {}) {
@@ -124,6 +211,42 @@ function App() {
       }))
       toastTimeoutRef.current = null
     }, 2800)
+  }
+
+  function mergeHoldingIntoSnapshot(updatedHolding) {
+    setPortfolioState((current) => {
+      const snapshot = current.snapshot
+      if (!snapshot?.holdings) {
+        return current
+      }
+
+      const nextHoldings = snapshot.holdings.map((holding) =>
+        holding.holdingId === updatedHolding.holdingId ? { ...holding, ...updatedHolding } : holding
+      )
+
+      return {
+        ...current,
+        snapshot: {
+          ...snapshot,
+          holdings: nextHoldings,
+        },
+      }
+    })
+  }
+
+  function mergeHoldingIntoVisiblePage(updatedHolding) {
+    const instruments = portfolioState.snapshot?.instruments ?? []
+    const updatedView = buildHoldingsView([updatedHolding], instruments)[0]
+    if (!updatedView) {
+      return
+    }
+
+    setHoldingsPageState((current) => ({
+      ...current,
+      items: current.items.map((holding) =>
+        holding.holdingId === updatedHolding.holdingId ? { ...holding, ...updatedView } : holding
+      ),
+    }))
   }
 
   async function fetchInsights(frameId) {
@@ -203,6 +326,49 @@ function App() {
         error: '',
       }))
       return { ok: false }
+    }
+  }
+
+  async function loadHoldingsPage(page = holdingsPage, size = holdingsPageSize) {
+    const requestId = holdingsRequestRef.current + 1
+    holdingsRequestRef.current = requestId
+
+    setHoldingsPageState((current) => ({
+      ...current,
+      loading: true,
+    }))
+
+    try {
+      const response = await getHoldingsPage(portfolioId, Math.max(page - 1, 0), size)
+      if (requestId !== holdingsRequestRef.current) {
+        return
+      }
+
+      const rawItems = Array.isArray(response?.content) ? response.content : []
+      const instruments = portfolioState.snapshot?.instruments ?? []
+      const items = buildHoldingsView(rawItems, instruments)
+      const totalPages = Math.max(1, Number(response?.totalPages ?? 1))
+      const totalItems = Math.max(0, Number(response?.totalElements ?? items.length))
+
+      setHoldingsPageState({
+        items,
+        totalPages,
+        totalItems,
+        loading: false,
+      })
+    } catch (error) {
+      if (requestId !== holdingsRequestRef.current) {
+        return
+      }
+
+      setHoldingsPageState((current) => ({
+        ...current,
+        loading: false,
+      }))
+      setActionState((current) => ({
+        ...current,
+        error: error.message,
+      }))
     }
   }
 
@@ -377,6 +543,7 @@ function App() {
         quantity: Number(formState.quantity),
       })
       await loadLiveSnapshot({ actionMessage: 'Holding added successfully.' })
+      await loadHoldingsPage(holdingsPage, holdingsPageSize)
       const insights = await fetchInsights(performanceFrame)
       setInsightState((current) => ({
         ...current,
@@ -393,6 +560,7 @@ function App() {
         quantity: '',
       }))
       setShowAddForm(false)
+      setLiveAnnouncement('Holding added successfully.')
     } catch (error) {
       logCustomerAction('add_holding_failed', { reason: error.message })
       setFormState((current) => ({
@@ -437,6 +605,7 @@ function App() {
       await deleteHolding(holdingId)
       logCustomerAction('delete_holding_succeeded', { holdingId })
       await loadLiveSnapshot({ actionMessage: 'Holding deleted successfully.' })
+      await loadHoldingsPage(holdingsPage, holdingsPageSize)
       const insights = await fetchInsights(performanceFrame)
       setInsightState((current) => ({
         ...current,
@@ -458,6 +627,218 @@ function App() {
       setActionState((current) => ({
         ...current,
         deletingId: null,
+      }))
+    }
+  }
+
+  async function handleUpdateHolding(holdingId, quantity) {
+    logCustomerAction('update_holding_clicked', { holdingId, quantity, mode: portfolioState.mode })
+    if (portfolioState.mode === 'demo') {
+      showToast('Update holding is disabled in presentation mode.', 'info')
+      return false
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setActionState((current) => ({
+        ...current,
+        error: 'Quantity must be greater than zero.',
+      }))
+      return false
+    }
+
+    setActionState((current) => ({
+      ...current,
+      updatingId: holdingId,
+      error: '',
+    }))
+
+    try {
+      const updatedHolding = await updateHoldingQuantity(holdingId, { quantity })
+      if (updatedHolding?.holdingId) {
+        mergeHoldingIntoSnapshot(updatedHolding)
+        mergeHoldingIntoVisiblePage(updatedHolding)
+      }
+
+      const [snapshotResult, insights] = await Promise.all([
+        loadLiveSnapshot({ actionMessage: 'Holding updated successfully.' }),
+        fetchInsights(performanceFrame),
+      ])
+
+      if (snapshotResult.ok) {
+        await loadHoldingsPage(holdingsPage, holdingsPageSize)
+      }
+
+      setInsightState((current) => ({
+        ...current,
+        loading: false,
+        error: insights.error,
+        performanceByFrame: {
+          ...current.performanceByFrame,
+          [performanceFrame]: insights.performance,
+        },
+        risk: insights.risk,
+      }))
+      setLiveAnnouncement('Holding quantity, market value, and portfolio metrics updated successfully.')
+      return true
+    } catch (error) {
+      setActionState((current) => ({
+        ...current,
+        error: error.message,
+      }))
+      return false
+    } finally {
+      setActionState((current) => ({
+        ...current,
+        updatingId: null,
+      }))
+    }
+  }
+
+  function handleImportCsvClick() {
+    if (portfolioState.mode === 'demo') {
+      showToast('Import is disabled in presentation mode.', 'info')
+      return
+    }
+
+    csvInputRef.current?.click()
+  }
+
+  async function handleImportCsvFileChange(event) {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    setActionState((current) => ({ ...current, importing: true, error: '' }))
+
+    try {
+      const parsedRows = parseHoldingsCsv(await file.text())
+      const instrumentByTicker = new Map(
+        (snapshot?.instruments ?? []).map((instrument) => [instrument.ticker?.toUpperCase(), instrument.instrumentId])
+      )
+
+      const payloads = []
+      for (const row of parsedRows) {
+        const quantity = Number(row.quantityRaw)
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error(`Invalid quantity at CSV line ${row.lineNumber}.`)
+        }
+
+        let instrumentId = null
+        if (row.instrumentIdRaw) {
+          const parsedId = Number(row.instrumentIdRaw)
+          if (Number.isFinite(parsedId) && parsedId > 0) {
+            instrumentId = parsedId
+          }
+        }
+
+        if (!instrumentId && row.tickerRaw) {
+          instrumentId = instrumentByTicker.get(row.tickerRaw.toUpperCase()) ?? null
+        }
+
+        if (!instrumentId) {
+          throw new Error(`Unknown instrument at CSV line ${row.lineNumber}. Use a valid instrumentId or ticker.`)
+        }
+
+        payloads.push({
+          instrumentId,
+          quantity,
+        })
+      }
+
+      const results = await Promise.allSettled(payloads.map((payload) => addHolding(portfolioId, payload)))
+      const successCount = results.filter((result) => result.status === 'fulfilled').length
+      const failedCount = results.length - successCount
+
+      if (successCount === 0) {
+        const firstFailure = results.find((result) => result.status === 'rejected')
+        throw new Error(firstFailure?.reason?.message ?? 'CSV import failed for all rows.')
+      }
+
+      await loadLiveSnapshot({ actionMessage: `Imported ${successCount} holding row(s) from CSV.` })
+      const insights = await fetchInsights(performanceFrame)
+      setInsightState((current) => ({
+        ...current,
+        loading: false,
+        error: insights.error,
+        performanceByFrame: {
+          ...current.performanceByFrame,
+          [performanceFrame]: insights.performance,
+        },
+        risk: insights.risk,
+      }))
+
+      if (failedCount > 0) {
+        showToast(`${failedCount} row(s) could not be imported. Check instrument IDs/tickers.`, 'info')
+      }
+    } catch (error) {
+      setActionState((current) => ({
+        ...current,
+        error: error.message,
+      }))
+    } finally {
+      event.target.value = ''
+      setActionState((current) => ({
+        ...current,
+        importing: false,
+      }))
+    }
+  }
+
+  async function handleExportStatementPdf() {
+    if (holdingsView.length === 0) {
+      showToast('No holdings available to export.', 'info')
+      return
+    }
+
+    setActionState((current) => ({ ...current, exporting: true, error: '' }))
+
+    try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      doc.setFontSize(16)
+      doc.text('Portfolio Holdings Statement', 40, 48)
+      doc.setFontSize(10)
+      doc.text(`As of ${formatDateLabel(dashboard?.asOf)}`, 40, 66)
+      doc.text(`Portfolio ID: ${portfolioId}`, 40, 82)
+
+      autoTable(doc, {
+        startY: 98,
+        head: [['Ticker', 'Instrument', 'Asset class', 'Qty', 'Avg cost', 'Price', 'Market value', 'Gain/Loss']],
+        body: holdingsView.map((holding) => [
+          holding.ticker,
+          holding.name,
+          holding.assetClass,
+          formatQuantity(holding.quantity),
+          formatCurrency(holding.avgCost),
+          formatCurrency(holding.currentPrice),
+          formatCurrency(holding.currentValue),
+          `${formatSignedCurrency(holding.gainLossAmount)} (${formatSignedPercent(holding.gainLossPercentage, 1)})`,
+        ]),
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [13, 23, 38] },
+      })
+
+      const totalValue = holdingsView.reduce((sum, holding) => sum + toNumber(holding.currentValue), 0)
+      const totalGainLoss = holdingsView.reduce((sum, holding) => sum + toNumber(holding.gainLossAmount), 0)
+      const finalY = doc.lastAutoTable?.finalY ?? 98
+
+      doc.setFontSize(11)
+      doc.text(`Total market value: ${formatCurrency(totalValue)}`, 40, finalY + 24)
+      doc.text(`Total gain/loss: ${formatSignedCurrency(totalGainLoss)}`, 40, finalY + 40)
+
+      const datePart = new Date().toISOString().slice(0, 10)
+      doc.save(`portfolio-statement-${datePart}.pdf`)
+      showToast('PDF statement exported.', 'success')
+    } catch (error) {
+      setActionState((current) => ({
+        ...current,
+        error: error.message,
+      }))
+    } finally {
+      setActionState((current) => ({
+        ...current,
+        exporting: false,
       }))
     }
   }
@@ -498,6 +879,8 @@ function App() {
           performanceExtremes.weak?.gainLossPercentage ?? dashboard?.totalReturnPercentage ?? 0
         )
   const riskOverview = buildRiskOverview(dashboard, holdingsView, assetClassAllocation, insightState.risk)
+  const valueSeries = dashboard?.valueOverTime ?? []
+  const latestValuePoint = valueSeries[valueSeries.length - 1]
   const healthScore = Math.max(0, Math.min(100, Math.round(riskOverview.score * 0.72 + 28)))
   const healthLabel = healthScore >= 75 ? 'Strong' : healthScore >= 55 ? 'Balanced' : 'Needs review'
   const dashboardGreeting = getTimeGreeting()
@@ -513,6 +896,31 @@ function App() {
       .toLowerCase()
       .includes(searchValue)
   })
+  const isServerPaginatedHoldings = deferredSearch.trim() === ''
+  const holdingsTotalPages = isServerPaginatedHoldings
+    ? Math.max(1, holdingsPageState.totalPages)
+    : Math.max(1, Math.ceil(filteredHoldings.length / holdingsPageSize))
+  const activeHoldingsPage = Math.min(holdingsPage, holdingsTotalPages)
+  const pagedHoldings = isServerPaginatedHoldings
+    ? holdingsPageState.items
+    : filteredHoldings.slice((activeHoldingsPage - 1) * holdingsPageSize, activeHoldingsPage * holdingsPageSize)
+  const holdingsTotalItems = isServerPaginatedHoldings ? holdingsPageState.totalItems : filteredHoldings.length
+
+  useEffect(() => {
+    setHoldingsPage((current) => Math.min(current, holdingsTotalPages))
+  }, [holdingsTotalPages])
+
+  useEffect(() => {
+    if (!isServerPaginatedHoldings) {
+      return
+    }
+
+    if (activeTab !== 'holdings') {
+      return
+    }
+
+    loadHoldingsPage(holdingsPage, holdingsPageSize)
+  }, [isServerPaginatedHoldings, holdingsPage, holdingsPageSize, activeTab])
 
   if (portfolioState.status === 'loading' && !snapshot) {
     return (
@@ -546,9 +954,30 @@ function App() {
           </div>
 
           <div className="hero-actions">
-            <button type="button" className="ghost-button">
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="visually-hidden-input"
+              onChange={handleImportCsvFileChange}
+            />
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleImportCsvClick}
+              disabled={actionState.importing || portfolioState.mode === 'demo'}
+            >
+              {actionState.importing ? <LoaderCircle size={16} className="spin" /> : <Upload size={16} />}
+              {actionState.importing ? 'Importing CSV...' : 'Import holdings CSV'}
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleExportStatementPdf}
+              disabled={actionState.exporting}
+            >
               <Download size={16} />
-              Export statement
+              {actionState.exporting ? 'Exporting PDF...' : 'Export statement PDF'}
             </button>
             <button
               type="button"
@@ -589,6 +1018,9 @@ function App() {
       ) : null}
       {insightState.error ? <div className="error-banner">{insightState.error}</div> : null}
       {toastState.visible ? <div className={`toast-popup ${toastState.type}`}>{toastState.message}</div> : null}
+      <div className="sr-live" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
 
       <main className="page-shell">
         {showAddForm ? (
@@ -635,7 +1067,7 @@ function App() {
               <div className="form-actions">
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="panel-ghost-button"
                   onClick={() => {
                     logCustomerAction('add_holding_form_closed', { source: 'cancel_button' })
                     setShowAddForm(false)
@@ -664,20 +1096,40 @@ function App() {
             mode={portfolioState.mode}
             healthScore={healthScore}
             healthLabel={healthLabel}
+            valueSeriesCount={valueSeries.length}
+            latestSeriesDate={latestValuePoint?.date}
           />
         ) : null}
 
         {activeTab === 'holdings' ? (
           <HoldingsTab
-            holdings={filteredHoldings}
+            holdings={pagedHoldings}
+            loading={holdingsPageState.loading}
             searchQuery={searchQuery}
             onSearchChange={(value) => {
               logCustomerAction('holdings_search_updated', { query: value })
               setSearchQuery(value)
+              setHoldingsPage(1)
+              setLiveAnnouncement(`Holdings filter applied. Query: ${value || 'all holdings'}.`)
             }}
             onDelete={handleDeleteHolding}
+            onUpdate={handleUpdateHolding}
             deletingId={actionState.deletingId}
+            updatingId={actionState.updatingId}
             mode={portfolioState.mode}
+            page={activeHoldingsPage}
+            totalPages={holdingsTotalPages}
+            pageSize={holdingsPageSize}
+            totalItems={holdingsTotalItems}
+            onPageChange={(nextPage) => {
+              setHoldingsPage(nextPage)
+              setLiveAnnouncement(`Moved to holdings page ${nextPage} of ${holdingsTotalPages}.`)
+            }}
+            onPageSizeChange={(size) => {
+              setHoldingsPageSize(size)
+              setHoldingsPage(1)
+              setLiveAnnouncement(`Rows per page changed to ${size}.`)
+            }}
             onOpenAddForm={() => {
               logCustomerAction('add_holding_form_opened', { source: 'holdings_empty_state' })
               setShowAddForm(true)
@@ -726,7 +1178,19 @@ function getTimeGreeting(date = new Date()) {
   return 'Good evening'
 }
 
-function DashboardTab({ greeting, dashboard, holdings, allocation, onRefresh, isRefreshing, mode, healthScore, healthLabel }) {
+function DashboardTab({
+  greeting,
+  dashboard,
+  holdings,
+  allocation,
+  onRefresh,
+  isRefreshing,
+  mode,
+  healthScore,
+  healthLabel,
+  valueSeriesCount,
+  latestSeriesDate,
+}) {
   return (
     <section className="page-stack">
       <div className="page-heading">
@@ -739,26 +1203,26 @@ function DashboardTab({ greeting, dashboard, holdings, allocation, onRefresh, is
 
       <div className="metric-grid">
         <MetricCard
-          label="Total portfolio value"
-          value={formatCurrency(dashboard?.totalPortfolioValue, dashboard?.baseCurrency)}
-          hint={`${formatCompactCurrency(dashboard?.dayReturnAmount, dashboard?.baseCurrency)} today`}
+          label="Current total asset value"
+          value={formatCurrency(dashboard?.totalAssetsCurrentValue ?? dashboard?.totalPortfolioValue, dashboard?.baseCurrency)}
+          hint={`${formatSignedCurrency(dashboard?.dayReturnAmount)} today`}
           positive={toNumber(dashboard?.dayReturnAmount) >= 0}
+        />
+        <MetricCard
+          label="Total invested value"
+          value={formatCurrency(dashboard?.totalAssetsInvestedValue ?? dashboard?.totalInvestedAmount, dashboard?.baseCurrency)}
+          hint="Value at time of investment"
         />
         <MetricCard
           label="Total return"
           value={formatPercent(dashboard?.totalReturnPercentage, 1)}
-          hint={`${formatCompactCurrency(dashboard?.totalReturnAmount, dashboard?.baseCurrency)} since inception`}
+          hint={`${formatSignedCurrency(dashboard?.totalReturnAmount)} since inception`}
           positive={toNumber(dashboard?.totalReturnAmount) >= 0}
         />
         <MetricCard
           label="Holdings"
           value={String(dashboard?.holdingsCount ?? 0)}
           hint={`${dashboard?.stockCount ?? 0} stocks, ${(dashboard?.etfCount ?? 0) + (dashboard?.bondCount ?? 0)} funds`}
-        />
-        <MetricCard
-          label="Cash available"
-          value={formatCurrency(dashboard?.cashAvailable, dashboard?.baseCurrency)}
-          hint={`${formatPercent(dashboard?.cashAvailablePercentage, 1)} of portfolio`}
         />
       </div>
 
@@ -768,7 +1232,11 @@ function DashboardTab({ greeting, dashboard, holdings, allocation, onRefresh, is
             <div>
               <p className="section-label">Trend</p>
               <h2>Portfolio value over time</h2>
-              <p className="panel-copy"></p>
+              <p className="panel-copy">
+                {valueSeriesCount > 0
+                  ? `${valueSeriesCount} points loaded • Latest point ${formatDateLabel(latestSeriesDate)}`
+                  : 'No historical points yet. Refresh prices to seed portfolio history.'}
+              </p>
             </div>
             <button type="button" className="ghost-button" onClick={onRefresh} disabled={isRefreshing || mode === 'demo'}>
               <RefreshCcw size={16} className={isRefreshing ? 'spin' : ''} />
@@ -851,23 +1319,50 @@ function DashboardTab({ greeting, dashboard, holdings, allocation, onRefresh, is
 
       
 
-      <section className="panel health-panel">
-        <div>
-          <p className="section-label">Portfolio health</p>
-          <h2>{healthLabel}</h2>
-        </div>
-        <div className="health-score-block">
-          <strong>{healthScore}/100</strong>
-          <div className="health-meter">
-            <span style={{ width: `${healthScore}%` }}></span>
-          </div>
-        </div>
-      </section>
+      
     </section>
   )
 }
 
-function HoldingsTab({ holdings, searchQuery, onSearchChange, onDelete, deletingId, mode, onOpenAddForm }) {
+function HoldingsTab({
+  holdings,
+  loading,
+  searchQuery,
+  onSearchChange,
+  onDelete,
+  onUpdate,
+  deletingId,
+  updatingId,
+  mode,
+  onOpenAddForm,
+  page,
+  totalPages,
+  pageSize,
+  totalItems,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  const [editingId, setEditingId] = useState(null)
+  const [editingQuantity, setEditingQuantity] = useState('')
+  const [editingError, setEditingError] = useState('')
+
+  async function handleSaveUpdate(holdingId) {
+    const quantity = Number(editingQuantity)
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setEditingError('Quantity must be greater than 0.')
+      return
+    }
+
+    setEditingError('')
+    const succeeded = await onUpdate(holdingId, quantity)
+    if (succeeded) {
+      setEditingId(null)
+      setEditingQuantity('')
+      setEditingError('')
+    }
+  }
+
   return (
     <section className="page-stack">
       <div className="page-heading compact">
@@ -889,6 +1384,25 @@ function HoldingsTab({ holdings, searchQuery, onSearchChange, onDelete, deleting
         {mode === 'demo' ? <div className="toolbar-note">Demo mode: edits disabled</div> : null}
       </div>
 
+      <div className="holdings-pagination-toolbar">
+        <div className="toolbar-note">
+          Showing {holdings.length === 0 ? 0 : (page - 1) * pageSize + 1}-
+          {Math.min(page * pageSize, totalItems)} of {totalItems}
+        </div>
+
+        <label className="page-size-shell" htmlFor="holdings-page-size">
+          Rows per page
+          <select
+            id="holdings-page-size"
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+          </select>
+        </label>
+      </div>
+
       <section className="panel table-panel">
         <div className="table-headings">
           <span>Instrument</span>
@@ -901,9 +1415,13 @@ function HoldingsTab({ holdings, searchQuery, onSearchChange, onDelete, deleting
           <span>Action</span>
         </div>
 
-        {holdings.length === 0 ? (
+        {loading ? (
           <div className="empty-state">
-            <p>No holdings match the current search.</p>
+            <p>Loading holdings...</p>
+          </div>
+        ) : holdings.length === 0 ? (
+          <div className="empty-state">
+            <p>No holdings were returned from Holding API for this view.</p>
             <p className="panel-copy">Try clearing the filters, or open the add holding form to stage a new position.</p>
             <button type="button" className="accent-button empty-state-action" onClick={onOpenAddForm}>
               Open add holding
@@ -919,14 +1437,80 @@ function HoldingsTab({ holdings, searchQuery, onSearchChange, onDelete, deleting
               <div>
                 <span className="asset-pill">{holding.assetClass}</span>
               </div>
-              <div>{formatQuantity(holding.quantity)}</div>
+              <div>
+                {editingId === holding.holdingId ? (
+                  <input
+                    className="inline-quantity-input"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={editingQuantity}
+                    onChange={(event) => setEditingQuantity(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        handleSaveUpdate(holding.holdingId)
+                      }
+
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setEditingId(null)
+                        setEditingQuantity('')
+                        setEditingError('')
+                      }
+                    }}
+                    aria-invalid={Boolean(editingError)}
+                  />
+                ) : (
+                  formatQuantity(holding.quantity)
+                )}
+              </div>
               <div>{formatCurrency(holding.avgCost, holding.currency)}</div>
               <div>{formatCurrency(holding.currentPrice, holding.currency)}</div>
               <div>{formatCurrency(holding.currentValue, holding.currency)}</div>
               <div className={holding.gainLossAmount >= 0 ? 'gain positive' : 'gain negative'}>
-                {formatCompactCurrency(holding.gainLossAmount, holding.currency)} ({formatPercent(holding.gainLossPercentage, 1)})
+                {formatSignedCurrency(holding.gainLossAmount)} ({formatSignedPercent(holding.gainLossPercentage, 1)})
               </div>
-              <div>
+              <div className="row-actions">
+                {editingId === holding.holdingId ? (
+                  <>
+                    <button
+                      type="button"
+                      className="inline-action update"
+                      onClick={() => handleSaveUpdate(holding.holdingId)}
+                      disabled={updatingId === holding.holdingId || mode === 'demo'}
+                    >
+                      {updatingId === holding.holdingId ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-action cancel"
+                      onClick={() => {
+                        setEditingId(null)
+                        setEditingQuantity('')
+                        setEditingError('')
+                      }}
+                    >
+                      <X size={14} />
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="inline-action edit"
+                    onClick={() => {
+                      setEditingId(holding.holdingId)
+                      setEditingQuantity(String(holding.quantity))
+                      setEditingError('')
+                    }}
+                    disabled={mode === 'demo'}
+                  >
+                    <Pencil size={14} />
+                    Update
+                  </button>
+                )}
                 <button
                   type="button"
                   className="inline-action"
@@ -940,7 +1524,21 @@ function HoldingsTab({ holdings, searchQuery, onSearchChange, onDelete, deleting
             </div>
           ))
         )}
+
+        {editingError ? <p className="form-error inline-edit-error">{editingError}</p> : null}
       </section>
+
+      <div className="holdings-page-controls" role="navigation" aria-label="Holdings pages">
+        <button type="button" className="page-button" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>
+          {'<'}
+        </button>
+        <span className="page-indicator">
+          {page} / {totalPages}
+        </span>
+        <button type="button" className="page-button" onClick={() => onPageChange(page + 1)} disabled={page >= totalPages}>
+          {'>'}
+        </button>
+      </div>
     </section>
   )
 }

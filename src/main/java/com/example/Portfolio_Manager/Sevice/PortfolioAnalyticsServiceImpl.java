@@ -121,6 +121,8 @@ public class PortfolioAnalyticsServiceImpl implements PortfolioAnalyticsService 
             OffsetDateTime.now(),
             portfolio.getBaseCurrency(),
                 totalValue.setScale(2, RoundingMode.HALF_UP),
+            totalValue.setScale(2, RoundingMode.HALF_UP),
+            totalCost.setScale(2, RoundingMode.HALF_UP),
             totalCost.setScale(2, RoundingMode.HALF_UP),
                 totalReturnAmount,
                 totalReturnPercentage,

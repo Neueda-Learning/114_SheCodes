@@ -29,7 +29,7 @@ public class DashboardController {
 
     @Operation(
             summary = "Get dashboard overview",
-            description = "Returns cards (total value, return, holdings, cash), value-over-time series and sector allocation"
+            description = "Returns cards (current asset value, invested value, return, holdings), value-over-time series and sector allocation"
     )
     @GetMapping
     public DashboardResponse getDashboard(

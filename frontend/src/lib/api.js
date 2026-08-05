@@ -39,11 +39,13 @@ async function apiRequest(path, options = {}) {
 }
 
 export async function getPortfolioSnapshot(portfolioId) {
-  const [dashboard, holdings, instruments] = await Promise.all([
+  const [dashboard, holdingsResponse, instruments] = await Promise.all([
     apiRequest(`/portfolio/${portfolioId}/dashboard?days=365`),
-    apiRequest(`/portfolio/${portfolioId}/holdings`),
+    getHoldingsPage(portfolioId, 0, 1000),
     apiRequest('/instruments'),
   ])
+
+  const holdings = holdingsResponse.content
 
   return { dashboard, holdings, instruments }
 }
@@ -65,6 +67,43 @@ export function deleteHolding(holdingId) {
   return apiRequest(`/portfolio/holdings/${holdingId}`, {
     method: 'DELETE',
   })
+}
+
+export function updateHoldingQuantity(holdingId, payload) {
+  return apiRequest(`/portfolio/holdings/${holdingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getHoldingsPage(portfolioId, page = 0, size = 10) {
+  return apiRequest(`/portfolio/${portfolioId}/holdings?page=${page}&size=${size}`).then(normalizeHoldingsPage)
+}
+
+function normalizeHoldingsPage(response) {
+  if (Array.isArray(response)) {
+    return {
+      content: response,
+      totalPages: 1,
+      totalElements: response.length,
+      number: 0,
+      size: response.length,
+    }
+  }
+
+  const fallbackContent = Array.isArray(response?.data?.content)
+    ? response.data.content
+    : Array.isArray(response?.content)
+      ? response.content
+      : []
+
+  return {
+    content: fallbackContent,
+    totalPages: Number(response?.totalPages ?? response?.data?.totalPages ?? 1),
+    totalElements: Number(response?.totalElements ?? response?.data?.totalElements ?? fallbackContent.length),
+    number: Number(response?.number ?? response?.data?.number ?? 0),
+    size: Number(response?.size ?? response?.data?.size ?? fallbackContent.length),
+  }
 }
 
 export function getPerformanceSummary(portfolioId, range = '1M') {

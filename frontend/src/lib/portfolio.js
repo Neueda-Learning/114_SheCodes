@@ -38,8 +38,20 @@ export function formatCompactCurrency(value) {
   }).format(toNumber(value))
 }
 
+export function formatSignedCurrency(value) {
+  const amount = toNumber(value)
+  const sign = amount >= 0 ? '+' : '-'
+  return `${sign}${formatCurrency(Math.abs(amount))}`
+}
+
 export function formatPercent(value, digits = 2) {
   return `${toNumber(value).toFixed(digits)}%`
+}
+
+export function formatSignedPercent(value, digits = 2) {
+  const amount = toNumber(value)
+  const sign = amount >= 0 ? '+' : '-'
+  return `${sign}${Math.abs(amount).toFixed(digits)}%`
 }
 
 export function formatQuantity(value) {
@@ -70,9 +82,12 @@ export function buildHoldingsView(holdings, instruments) {
     const avgCost = toNumber(holding.avgCost)
     const currentPrice = toNumber(holding.currentPrice)
     const currentValue = toNumber(holding.currentValue)
-    const invested = quantity * avgCost
-    const gainLossAmount = currentValue - invested
-    const gainLossPercentage = invested === 0 ? 0 : (gainLossAmount / invested) * 100
+    const invested = toNumber(holding.investedAmount ?? quantity * avgCost)
+    const gainLossAmount = toNumber(holding.gainLossAmount ?? currentValue - invested)
+    const gainLossPercentage = toNumber(
+      holding.gainLossPercentage ?? (invested === 0 ? 0 : (gainLossAmount / invested) * 100)
+    )
+    const backendAssetClass = holding.assetClass ? String(holding.assetClass).toUpperCase() : null
 
     return {
       ...holding,
@@ -82,10 +97,10 @@ export function buildHoldingsView(holdings, instruments) {
       currentValue,
       gainLossAmount,
       gainLossPercentage,
-      name: instrument.name ?? holding.ticker,
-      assetClass: instrument.assetClass ?? 'UNASSIGNED',
-      exchange: instrument.exchange ?? 'N/A',
-      currency: 'USD',
+      name: holding.instrumentName ?? instrument.name ?? holding.ticker,
+      assetClass: backendAssetClass ?? instrument.assetClass ?? 'UNASSIGNED',
+      exchange: holding.exchange ?? instrument.exchange ?? 'N/A',
+      currency: holding.currency ?? instrument.currency ?? 'USD',
     }
   })
 }
