@@ -13,7 +13,7 @@ pipeline {
         DB_PASSWORD = credentials('db-password')
         DB_NAME     = 'portfolio_manager'
         JAVA_HOME   = '/usr/lib/jvm/java-21-amazon-corretto'
-    PATH        = "${JAVA_HOME}/bin:${env.PATH}"
+        PATH        = "${JAVA_HOME}/bin:${env.PATH}"
     }
 
     stages {
