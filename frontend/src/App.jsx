@@ -36,6 +36,7 @@ import { demoSnapshot } from './data/demoPortfolio'
 import {
   addHolding,
   deleteHolding,
+  getExchangeRate,
   getHoldingsPage,
   getPerformanceHoldings,
   getPerformanceSummary,
@@ -179,6 +180,12 @@ function App() {
     quantity: '',
     submitting: false,
     error: '',
+  })
+  const [usdToInr, setUsdToInr] = useState(84.5)
+  const [displayCurrency, setDisplayCurrency] = useState('USD')
+  const [fxRates, setFxRates] = useState({
+    USD_INR: 84.5,
+    INR_USD: 1 / 84.5,
   })
   const [holdingsPage, setHoldingsPage] = useState(1)
   const [holdingsPageSize, setHoldingsPageSize] = useState(10)
@@ -374,11 +381,170 @@ function App() {
     }
   }
 
+  async function refreshUsdInrRate() {
+    try {
+      const rate = await getExchangeRate('USD', 'INR')
+      if (rate > 0) {
+        setUsdToInr(rate)
+        setFxRates((current) => ({
+          ...current,
+          USD_INR: rate,
+          INR_USD: 1 / rate,
+        }))
+      }
+    } catch {
+      // Keep the last known FX rate if live fetch fails.
+    }
+  }
+
+  function convertAmountForDisplay(value, baseCurrency = 'USD', targetCurrency = displayCurrency) {
+    const amount = toNumber(value)
+    const base = String(baseCurrency ?? 'USD').toUpperCase()
+    const target = String(targetCurrency ?? 'USD').toUpperCase()
+
+    if (base === target) {
+      return amount
+    }
+
+    const directRate = toNumber(fxRates[`${base}_${target}`])
+    if (directRate > 0) {
+      return amount * directRate
+    }
+
+    const inverseRate = toNumber(fxRates[`${target}_${base}`])
+    if (inverseRate > 0) {
+      return amount / inverseRate
+    }
+
+    const baseToUsd = base === 'USD' ? 1 : toNumber(fxRates[`${base}_USD`])
+    const usdToTarget = target === 'USD' ? 1 : toNumber(fxRates[`USD_${target}`])
+
+    if (baseToUsd > 0 && usdToTarget > 0) {
+      return amount * baseToUsd * usdToTarget
+    }
+
+    return amount
+  }
+
+  async function refreshDisplayFxRates(nextCurrency = displayCurrency, snapshotOverride = null) {
+    const target = String(nextCurrency ?? 'USD').toUpperCase()
+    const snapshotData = snapshotOverride ?? portfolioState.snapshot
+    const sources = new Set(['USD', 'INR'])
+
+    const dashboardCurrency = snapshotData?.dashboard?.baseCurrency
+    if (dashboardCurrency) {
+      sources.add(String(dashboardCurrency).toUpperCase())
+    }
+
+    for (const instrument of snapshotData?.instruments ?? []) {
+      if (instrument?.currency) {
+        sources.add(String(instrument.currency).toUpperCase())
+      }
+    }
+
+    for (const holding of snapshotData?.holdings ?? []) {
+      if (holding?.currency) {
+        sources.add(String(holding.currency).toUpperCase())
+      }
+    }
+
+    sources.add(target)
+
+    const pairKeys = new Set()
+    const pairs = []
+
+    for (const base of sources) {
+      if (base !== target) {
+        const key = `${base}_${target}`
+        if (!pairKeys.has(key)) {
+          pairKeys.add(key)
+          pairs.push([base, target])
+        }
+      }
+
+      if (base !== 'USD') {
+        const usdKey = `${base}_USD`
+        if (!pairKeys.has(usdKey)) {
+          pairKeys.add(usdKey)
+          pairs.push([base, 'USD'])
+        }
+      }
+    }
+
+    if (target !== 'USD') {
+      const usdTargetKey = `USD_${target}`
+      if (!pairKeys.has(usdTargetKey)) {
+        pairKeys.add(usdTargetKey)
+        pairs.push(['USD', target])
+      }
+    }
+
+    if (pairs.length === 0) {
+      return
+    }
+
+    const results = await Promise.allSettled(
+      pairs.map(async ([from, to]) => {
+        const rate = await getExchangeRate(from, to)
+        return { from, to, rate }
+      })
+    )
+
+    setFxRates((current) => {
+      const next = { ...current }
+
+      for (const result of results) {
+        if (result.status !== 'fulfilled') {
+          continue
+        }
+
+        const { from, to, rate } = result.value
+        const numericRate = toNumber(rate)
+        if (numericRate <= 0) {
+          continue
+        }
+
+        next[`${from}_${to}`] = numericRate
+        next[`${to}_${from}`] = 1 / numericRate
+      }
+
+      const latestUsdInr = toNumber(next.USD_INR)
+      if (latestUsdInr > 0) {
+        setUsdToInr(latestUsdInr)
+      }
+
+      return next
+    })
+  }
+
+  function formatDualCurrency(value, baseCurrency = 'USD') {
+    const target = String(displayCurrency ?? 'USD').toUpperCase()
+    const converted = convertAmountForDisplay(value, baseCurrency, target)
+
+    return formatCurrency(converted, target, 1)
+  }
+
+  function formatDualSignedCurrency(value, baseCurrency = 'USD') {
+    const target = String(displayCurrency ?? 'USD').toUpperCase()
+    const converted = convertAmountForDisplay(value, baseCurrency, target)
+
+    return formatSignedCurrency(converted, target, 1)
+  }
+
+  function formatCompactDisplayCurrency(value, baseCurrency = 'USD') {
+    const target = String(displayCurrency ?? 'USD').toUpperCase()
+    const converted = convertAmountForDisplay(value, baseCurrency, target)
+
+    return formatCompactCurrency(converted, target, 1)
+  }
+
   useEffect(() => {
     let active = true
 
     async function initialize() {
+      await refreshUsdInrRate()
       const result = await loadLiveSnapshot({ loadingStatus: 'loading' })
+      await refreshDisplayFxRates(displayCurrency, result.ok ? result.snapshot : demoSnapshot)
       if (!active || !result.ok) {
         return
       }
@@ -407,6 +573,19 @@ function App() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    refreshUsdInrRate()
+    refreshDisplayFxRates(displayCurrency)
+    const timerId = setInterval(() => {
+      refreshUsdInrRate()
+      refreshDisplayFxRates(displayCurrency)
+    }, 60 * 1000)
+
+    return () => {
+      clearInterval(timerId)
+    }
+  }, [displayCurrency, portfolioState.snapshot])
 
   useEffect(() => {
     if (portfolioState.mode !== 'live' || insightState.performanceByFrame[performanceFrame]) {
@@ -726,21 +905,31 @@ function App() {
           throw new Error(`Invalid quantity at CSV line ${row.lineNumber}.`)
         }
 
-        let instrumentId = null
+        let instrumentIdFromCsv = null
+        let instrumentIdFromTicker = null
+
         if (row.instrumentIdRaw) {
           const parsedId = Number(row.instrumentIdRaw)
           if (Number.isFinite(parsedId) && parsedId > 0) {
-            // numeric value → treat as database instrument ID
-            instrumentId = parsedId
+            instrumentIdFromCsv = parsedId
           } else {
             // non-numeric value in instrument column (e.g. "AAPL") → treat as ticker
-            instrumentId = instrumentByTicker.get(row.instrumentIdRaw.toUpperCase()) ?? null
+            instrumentIdFromTicker = instrumentByTicker.get(row.instrumentIdRaw.toUpperCase()) ?? null
           }
         }
 
-        if (!instrumentId && row.tickerRaw) {
-          instrumentId = instrumentByTicker.get(row.tickerRaw.toUpperCase()) ?? null
+        if (row.tickerRaw) {
+          instrumentIdFromTicker = instrumentByTicker.get(row.tickerRaw.toUpperCase()) ?? instrumentIdFromTicker
         }
+
+        if (instrumentIdFromCsv && instrumentIdFromTicker && instrumentIdFromCsv !== instrumentIdFromTicker) {
+          throw new Error(
+            `CSV line ${row.lineNumber} has conflicting instrumentId (${instrumentIdFromCsv}) and ticker (${row.tickerRaw || row.instrumentIdRaw}).`
+          )
+        }
+
+        // Prefer ticker-based mapping because IDs can vary across databases.
+        const instrumentId = instrumentIdFromTicker ?? instrumentIdFromCsv
 
         if (!instrumentId) {
           throw new Error(`Unknown instrument at CSV line ${row.lineNumber}. Use a valid instrumentId or ticker.`)
@@ -762,6 +951,8 @@ function App() {
       }
 
       await loadLiveSnapshot({ actionMessage: `Imported ${successCount} holding row(s) from CSV.` })
+      setHoldingsPage(1)
+      await loadHoldingsPage(1, holdingsPageSize)
       const insights = await fetchInsights(performanceFrame)
       setInsightState((current) => ({
         ...current,
@@ -777,6 +968,10 @@ function App() {
       if (failedCount > 0) {
         showToast(`${failedCount} row(s) could not be imported. Check instrument IDs/tickers.`, 'info')
       }
+
+      setLiveAnnouncement(
+        `Imported ${successCount} row(s). Holdings list and totals have been refreshed and synchronized.`
+      )
     } catch (error) {
       setActionState((current) => ({
         ...current,
@@ -816,22 +1011,29 @@ function App() {
           holding.name,
           holding.assetClass,
           formatQuantity(holding.quantity),
-          formatCurrency(holding.avgCost),
-          formatCurrency(holding.currentPrice),
-          formatCurrency(holding.currentValue),
-          `${formatSignedCurrency(holding.gainLossAmount)} (${formatSignedPercent(holding.gainLossPercentage, 1)})`,
+          formatDualCurrency(holding.avgCost, holding.currency),
+          formatDualCurrency(holding.currentPrice, holding.currency),
+          formatDualCurrency(holding.currentValue, holding.currency),
+          `${formatDualSignedCurrency(holding.gainLossAmount, holding.currency)} (${formatSignedPercent(holding.gainLossPercentage, 1)})`,
         ]),
         styles: { fontSize: 9, cellPadding: 6 },
         headStyles: { fillColor: [13, 23, 38] },
       })
 
-      const totalValue = holdingsView.reduce((sum, holding) => sum + toNumber(holding.currentValue), 0)
-      const totalGainLoss = holdingsView.reduce((sum, holding) => sum + toNumber(holding.gainLossAmount), 0)
+      const totalValue = holdingsView.reduce(
+        (sum, holding) => sum + convertAmountForDisplay(holding.currentValue, holding.currency, displayCurrency),
+        0
+      )
+      const totalGainLoss = holdingsView.reduce(
+        (sum, holding) => sum + convertAmountForDisplay(holding.gainLossAmount, holding.currency, displayCurrency),
+        0
+      )
       const finalY = doc.lastAutoTable?.finalY ?? 98
 
       doc.setFontSize(11)
-      doc.text(`Total market value: ${formatCurrency(totalValue)}`, 40, finalY + 24)
-      doc.text(`Total gain/loss: ${formatSignedCurrency(totalGainLoss)}`, 40, finalY + 40)
+      doc.text(`Display currency: ${displayCurrency}`, 40, finalY + 24)
+      doc.text(`Total market value: ${formatCurrency(totalValue, displayCurrency, 1)}`, 40, finalY + 40)
+      doc.text(`Total gain/loss: ${formatSignedCurrency(totalGainLoss, displayCurrency, 1)}`, 40, finalY + 56)
 
       const datePart = new Date().toISOString().slice(0, 10)
       doc.save(`portfolio-statement-${datePart}.pdf`)
@@ -875,10 +1077,22 @@ function App() {
         startY: 114,
         head: [['Dashboard metric', 'Value']],
         body: [
-          ['Current total asset value', formatCurrency(dashboardData?.totalAssetsCurrentValue ?? dashboardData?.totalPortfolioValue)],
-          ['Total invested value', formatCurrency(dashboardData?.totalAssetsInvestedValue ?? dashboardData?.totalInvestedAmount)],
-          ['Total return', `${formatSignedCurrency(dashboardData?.totalReturnAmount)} (${formatPercent(dashboardData?.totalReturnPercentage, 1)})`],
-          ['Day return', `${formatSignedCurrency(dashboardData?.dayReturnAmount)} (${formatPercent(dashboardData?.dayReturnPercentage, 1)})`],
+          [
+            'Current total asset value',
+            formatDualCurrency(dashboardData?.totalAssetsCurrentValue ?? dashboardData?.totalPortfolioValue, dashboardData?.baseCurrency),
+          ],
+          [
+            'Total invested value',
+            formatDualCurrency(dashboardData?.totalAssetsInvestedValue ?? dashboardData?.totalInvestedAmount, dashboardData?.baseCurrency),
+          ],
+          [
+            'Total return',
+            `${formatDualSignedCurrency(dashboardData?.totalReturnAmount, dashboardData?.baseCurrency)} (${formatPercent(dashboardData?.totalReturnPercentage, 1)})`,
+          ],
+          [
+            'Day return',
+            `${formatDualSignedCurrency(dashboardData?.dayReturnAmount, dashboardData?.baseCurrency)} (${formatPercent(dashboardData?.dayReturnPercentage, 1)})`,
+          ],
           ['Holdings count', String(dashboardData?.holdingsCount ?? 0)],
         ],
         styles: { fontSize: 9, cellPadding: 6 },
@@ -891,7 +1105,7 @@ function App() {
           head: [['Asset allocation', 'Current value', 'Weight']],
           body: allocationSlices.map((slice) => [
             slice.label,
-            formatCurrency(slice.value, dashboardData?.baseCurrency),
+            formatDualCurrency(slice.value, dashboardData?.baseCurrency),
             formatPercent(slice.percentage, 2),
           ]),
           styles: { fontSize: 9, cellPadding: 6 },
@@ -929,7 +1143,7 @@ function App() {
           holding.ticker,
           formatSignedPercent(holding.rangeReturnPercentage, 2),
           formatSignedPercent(holding.totalReturnPercentage, 2),
-          formatCurrency(holding.currentValue),
+          formatDualCurrency(holding.currentValue, dashboardData?.baseCurrency),
         ]),
         styles: { fontSize: 9, cellPadding: 6 },
         headStyles: { fillColor: [13, 23, 38] },
@@ -1007,6 +1221,23 @@ function App() {
   const snapshot = portfolioState.snapshot
   const dashboard = snapshot?.dashboard
   const holdingsView = buildHoldingsView(snapshot?.holdings ?? [], snapshot?.instruments ?? [])
+  const holdingsTotals = holdingsView.reduce(
+    (accumulator, holding) => {
+      const currency = holding.currency ?? dashboard?.baseCurrency ?? 'USD'
+      const invested = convertAmountForDisplay(holding.investedAmount, currency, displayCurrency)
+      const current = convertAmountForDisplay(holding.currentValue, currency, displayCurrency)
+      const gainLoss = convertAmountForDisplay(holding.gainLossAmount, currency, displayCurrency)
+
+      return {
+        invested: accumulator.invested + invested,
+        current: accumulator.current + current,
+        gainLoss: accumulator.gainLoss + gainLoss,
+      }
+    },
+    { invested: 0, current: 0, gainLoss: 0 }
+  )
+  const holdingsReturnPercent =
+    holdingsTotals.invested > 0 ? (holdingsTotals.gainLoss / holdingsTotals.invested) * 100 : 0
   const assetClassAllocation = buildAssetClassAllocation(holdingsView, dashboard)
   const tickerTape = buildTickerTape(snapshot?.instruments ?? [], holdingsView)
   const performanceSeries = buildPerformanceSeries(dashboard?.valueOverTime ?? [], performanceFrame)
@@ -1099,7 +1330,7 @@ function App() {
         {tickerTape.map((item) => (
           <div key={item.ticker} className="ticker-chip">
             <span className="ticker-symbol">{item.ticker}</span>
-            <span className="ticker-price">{formatCurrency(item.currentPrice, item.currency)}</span>
+            <span className="ticker-price">{formatDualCurrency(item.currentPrice, item.currency)}</span>
             <span className={item.change >= 0 ? 'ticker-change positive' : 'ticker-change negative'}>
               {item.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
               {formatPercent(item.change, 1)}
@@ -1132,6 +1363,24 @@ function App() {
             >
               + Add holding
             </button>
+
+            <div className="currency-select-shell">
+              <select
+                id="display-currency-select"
+                className="dashboard-action-select currency-select"
+                aria-label="Display currency"
+                value={displayCurrency}
+                onChange={(event) => {
+                  const nextCurrency = event.target.value
+                  setDisplayCurrency(nextCurrency)
+                  refreshDisplayFxRates(nextCurrency)
+                  logCustomerAction('display_currency_changed', { currency: nextCurrency })
+                }}
+              >
+                <option value="USD">USD</option>
+                <option value="INR">INR</option>
+              </select>
+            </div>
 
             <div className="dashboard-action-row hero-dropdown-row">
               <select
@@ -1262,24 +1511,24 @@ function App() {
             <div className="metric-grid">
               <MetricCard
                 label="Current total asset value"
-                value={formatCurrency(dashboard?.totalAssetsCurrentValue ?? dashboard?.totalPortfolioValue, dashboard?.baseCurrency)}
-                hint={`${formatSignedCurrency(dashboard?.dayReturnAmount)} today`}
+                value={formatCurrency(holdingsTotals.current, displayCurrency, 1)}
+                hint={`${formatDualSignedCurrency(dashboard?.dayReturnAmount, dashboard?.baseCurrency)} today`}
                 positive={toNumber(dashboard?.dayReturnAmount) >= 0}
               />
               <MetricCard
                 label="Total invested value"
-                value={formatCurrency(dashboard?.totalAssetsInvestedValue ?? dashboard?.totalInvestedAmount, dashboard?.baseCurrency)}
+                value={formatCurrency(holdingsTotals.invested, displayCurrency, 1)}
                 hint="Value at time of investment"
               />
               <MetricCard
                 label="Total P&L"
-                value={formatPercent(dashboard?.totalReturnPercentage, 1)}
-                hint={`${formatSignedCurrency(dashboard?.totalReturnAmount)} since inception`}
-                positive={toNumber(dashboard?.totalReturnAmount) >= 0}
+                value={formatPercent(holdingsReturnPercent, 1)}
+                hint={`${formatSignedCurrency(holdingsTotals.gainLoss, displayCurrency, 1)} since inception`}
+                positive={holdingsTotals.gainLoss >= 0}
               />
               <MetricCard
                 label="Holdings"
-                value={String(dashboard?.holdingsCount ?? 0)}
+                value={String(holdingsView.length)}
                 hint={`${dashboard?.stockCount ?? 0} stocks, ${(dashboard?.etfCount ?? 0) + (dashboard?.bondCount ?? 0)} funds`}
               />
             </div>
@@ -1299,6 +1548,10 @@ function App() {
             healthLabel={healthLabel}
             valueSeriesCount={valueSeries.length}
             latestSeriesDate={latestValuePoint?.date}
+            usdToInr={usdToInr}
+            formatDualCurrency={formatDualCurrency}
+            formatCompactDisplayCurrency={formatCompactDisplayCurrency}
+            displayCurrency={displayCurrency}
           />
         ) : null}
 
@@ -1335,6 +1588,9 @@ function App() {
               logCustomerAction('add_holding_form_opened', { source: 'holdings_empty_state' })
               setShowAddForm(true)
             }}
+            usdToInr={usdToInr}
+            formatDualCurrency={formatDualCurrency}
+            formatDualSignedCurrency={formatDualSignedCurrency}
           />
         ) : null}
 
@@ -1349,11 +1605,19 @@ function App() {
             series={performanceChartSeries}
             performanceExtremes={performanceExtremes}
             onUserAction={logCustomerAction}
+            usdToInr={usdToInr}
+            formatDualCurrency={formatDualCurrency}
+            formatCompactDisplayCurrency={formatCompactDisplayCurrency}
           />
         ) : null}
 
         {activeTab === 'risk' ? (
-          <RiskTab dashboard={dashboard} overview={riskOverview} />
+          <RiskTab
+            dashboard={dashboard}
+            overview={riskOverview}
+            formatDualCurrency={formatDualCurrency}
+            currentPortfolioDisplayValue={formatCurrency(holdingsTotals.current, displayCurrency, 1)}
+          />
         ) : null}
       </main>
 
@@ -1391,13 +1655,17 @@ function DashboardTab({
   healthLabel,
   valueSeriesCount,
   latestSeriesDate,
+  usdToInr,
+  formatDualCurrency,
+  formatCompactDisplayCurrency,
+  displayCurrency,
 }) {
   return (
     <section className="page-stack">
       <div className="page-heading">
         <h1>{greeting}</h1>
         <p className="page-subtitle">
-          As of {formatDateLabel(dashboard?.asOf)} | Base currency USD
+          As of {formatDateLabel(dashboard?.asOf)} | Display currency {displayCurrency} | 1 USD = {formatCurrency(1, 'INR', usdToInr)}
         </p>
       </div>
 
@@ -1433,10 +1701,10 @@ function DashboardTab({
                   tickLine={false}
                   axisLine={false}
                   tick={{ fill: '#5b6475', fontSize: 12 }}
-                  tickFormatter={(value) => formatCompactCurrency(value, dashboard?.baseCurrency)}
+                  tickFormatter={(value) => formatCompactDisplayCurrency(value, dashboard?.baseCurrency)}
                 />
                 <Tooltip
-                  formatter={(value) => formatCurrency(value, dashboard?.baseCurrency)}
+                  formatter={(value) => formatDualCurrency(value, dashboard?.baseCurrency)}
                   labelFormatter={(label) => `Date: ${label}`}
                   contentStyle={{ borderRadius: 18, border: '1px solid #d9d0bf' }}
                 />
@@ -1470,7 +1738,7 @@ function DashboardTab({
                       <Cell key={slice.label} fill={slice.color} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => formatCurrency(value, dashboard?.baseCurrency)} />
+                  <Tooltip formatter={(value) => formatDualCurrency(value, dashboard?.baseCurrency)} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -1514,6 +1782,8 @@ function HoldingsTab({
   totalItems,
   onPageChange,
   onPageSizeChange,
+  formatDualCurrency,
+  formatDualSignedCurrency,
 }) {
   const [editingId, setEditingId] = useState(null)
   const [editingQuantity, setEditingQuantity] = useState('')
@@ -1652,12 +1922,12 @@ function HoldingsTab({
                   formatQuantity(holding.quantity)
                 )}
               </div>
-              <div>{formatCurrency(holding.avgCost, holding.currency)}</div>
-              <div>{formatCurrency(holding.investedAmount, holding.currency)}</div>
-              <div>{formatCurrency(holding.currentPrice, holding.currency)}</div>
-              <div>{formatCurrency(holding.currentValue, holding.currency)}</div>
+              <div>{formatDualCurrency(holding.avgCost, holding.currency)}</div>
+              <div>{formatDualCurrency(holding.investedAmount, holding.currency)}</div>
+              <div>{formatDualCurrency(holding.currentPrice, holding.currency)}</div>
+              <div>{formatDualCurrency(holding.currentValue, holding.currency)}</div>
               <div className={holding.gainLossAmount >= 0 ? 'gain positive' : 'gain negative'}>
-                {formatSignedCurrency(holding.gainLossAmount)} ({formatSignedPercent(holding.gainLossPercentage, 1)})
+                {formatDualSignedCurrency(holding.gainLossAmount, holding.currency)} ({formatSignedPercent(holding.gainLossPercentage, 1)})
               </div>
               <div className="row-actions">
                 {editingId === holding.holdingId ? (
@@ -1731,7 +2001,7 @@ function HoldingsTab({
   )
 }
 
-function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtremes, onUserAction }) {
+function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtremes, onUserAction, formatDualCurrency, formatCompactDisplayCurrency }) {
   const [focusSeries, setFocusSeries] = useState('both')
 
   return (
@@ -1806,7 +2076,7 @@ function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtreme
                 tickLine={false}
                 axisLine={false}
                 tick={{ fill: '#6b7483', fontSize: 12 }}
-                tickFormatter={(value) => formatCompactCurrency(value, dashboard?.baseCurrency)}
+                tickFormatter={(value) => formatCompactDisplayCurrency(value, dashboard?.baseCurrency)}
               />
               <Tooltip
                 shared={false}
@@ -1816,6 +2086,7 @@ function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtreme
                     focusSeries={focusSeries}
                     topTicker={performanceExtremes.top?.ticker}
                     worstTicker={performanceExtremes.weak?.ticker}
+                    formatDualCurrency={formatDualCurrency}
                   />
                 }
               />
@@ -1865,7 +2136,7 @@ function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtreme
   )
 }
 
-function PerformanceLineTooltip({ active, payload, label, currency, focusSeries, topTicker, worstTicker }) {
+function PerformanceLineTooltip({ active, payload, label, currency, focusSeries, topTicker, worstTicker, formatDualCurrency }) {
   if (!active || !payload || payload.length === 0) {
     return null
   }
@@ -1882,19 +2153,19 @@ function PerformanceLineTooltip({ active, payload, label, currency, focusSeries,
       <p className="performance-tooltip-date">Date: {label}</p>
       {showTop ? (
         <p className="performance-tooltip-line top">
-          Top {topTicker ?? 'N/A'}: {formatCurrency(topPoint.value, currency)}
+          Top {topTicker ?? 'N/A'}: {formatDualCurrency(topPoint.value, currency)}
         </p>
       ) : null}
       {showWorst ? (
         <p className="performance-tooltip-line worst">
-          Worst {worstTicker ?? 'N/A'}: {formatCurrency(worstPoint.value, currency)}
+          Worst {worstTicker ?? 'N/A'}: {formatDualCurrency(worstPoint.value, currency)}
         </p>
       ) : null}
     </div>
   )
 }
 
-function RiskTab({ dashboard, overview }) {
+function RiskTab({ dashboard, overview, formatDualCurrency, currentPortfolioDisplayValue }) {
   return (
     <section className="page-stack">
       <div className="page-heading compact">
@@ -1922,6 +2193,10 @@ function RiskTab({ dashboard, overview }) {
 
           <div className="risk-metrics-grid">
             <div>
+              <span className="metric-caption">Current portfolio value</span>
+              <strong>{currentPortfolioDisplayValue}</strong>
+            </div>
+            <div>
               <span className="metric-caption">Annualised volatility</span>
               <strong>{formatPercent(overview.volatility, 1)}</strong>
             </div>
@@ -1932,10 +2207,6 @@ function RiskTab({ dashboard, overview }) {
             <div>
               <span className="metric-caption">Largest allocation</span>
               <strong>{formatPercent(overview.concentration, 1)}</strong>
-            </div>
-            <div>
-              <span className="metric-caption">Cash buffer</span>
-              <strong>{formatPercent(dashboard?.cashAvailablePercentage, 1)}</strong>
             </div>
           </div>
         </section>

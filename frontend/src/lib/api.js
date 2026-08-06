@@ -135,3 +135,9 @@ export function getRiskMaxDrawdown() {
 export function getRiskConcentration(threshold = 0.25) {
   return apiRequest(`/risk/concentration?threshold=${threshold}`)
 }
+
+export function getExchangeRate(from, to) {
+  return apiRequest(`/market/price/${encodeURIComponent(`${from}${to}=X`)}`).then(
+    (data) => Number(data?.currentPrice ?? 0)
+  )
+}

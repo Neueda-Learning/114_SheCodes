@@ -444,6 +444,18 @@ h2,
   color: #1f3347;
 }
 
+.currency-select-shell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.currency-select {
+  min-width: 120px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
 .dashboard-action-select option {
   color: #1f3347;
   background: #ffffff;

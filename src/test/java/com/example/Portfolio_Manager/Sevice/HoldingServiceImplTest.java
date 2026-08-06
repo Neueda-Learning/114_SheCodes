@@ -7,6 +7,7 @@ import com.example.Portfolio_Manager.Model.Portfolio;
 import com.example.Portfolio_Manager.Repository.HoldingRepository;
 import com.example.Portfolio_Manager.Repository.InstrumentRepository;
 import com.example.Portfolio_Manager.Repository.PortfolioRepository;
+import com.example.Portfolio_Manager.Repository.Price;
 import com.example.Portfolio_Manager.dto.AddHoldingRequest;
 import com.example.Portfolio_Manager.dto.HoldingResponse;
 import com.example.Portfolio_Manager.dto.UpdateHoldingQuantityRequest;
@@ -48,6 +49,9 @@ class HoldingServiceImplTest {
 
     @Mock
     private YahooFinanceService yahooFinanceService;
+
+    @Mock
+    private Price priceRepository;
 
     @InjectMocks
     private HoldingServiceImpl holdingService;
@@ -138,7 +142,7 @@ class HoldingServiceImplTest {
     @Test
     void updateHoldingQuantityUpdatesExistingHolding() {
         UpdateHoldingQuantityRequest request = new UpdateHoldingQuantityRequest();
-        request.setQuantity(new BigDecimal("9"));
+        request.setQuantity(9);
 
         when(holdingRepository.findById(50L)).thenReturn(Optional.of(holding));
         when(holdingRepository.save(any(Holding.class))).thenAnswer(invocation -> invocation.getArgument(0));

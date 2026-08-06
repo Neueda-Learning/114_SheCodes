@@ -7,9 +7,11 @@ import com.example.Portfolio_Manager.dto.UpdateHoldingQuantityRequest;
 import com.example.Portfolio_Manager.Model.Holding;
 import com.example.Portfolio_Manager.Model.Instrument;
 import com.example.Portfolio_Manager.Model.Portfolio;
+import com.example.Portfolio_Manager.Model.Price_History;
 import com.example.Portfolio_Manager.Repository.HoldingRepository;
 import com.example.Portfolio_Manager.Repository.InstrumentRepository;
 import com.example.Portfolio_Manager.Repository.PortfolioRepository;
+import com.example.Portfolio_Manager.Repository.Price;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,18 +36,22 @@ public class HoldingServiceImpl implements HoldingService {
 
     private final YahooFinanceService yahooFinanceService;
 
+        private final Price priceRepository;
+
 
     public HoldingServiceImpl(
             HoldingRepository holdingRepository,
                         PortfolioRepository portfolioRepository,
                         InstrumentRepository instrumentRepository,
-            YahooFinanceService yahooFinanceService
+            YahooFinanceService yahooFinanceService,
+            Price priceRepository
     ) {
 
         this.holdingRepository = holdingRepository;
                 this.portfolioRepository = portfolioRepository;
                 this.instrumentRepository = instrumentRepository;
         this.yahooFinanceService = yahooFinanceService;
+                this.priceRepository = priceRepository;
 
     }
 
@@ -78,7 +84,7 @@ public class HoldingServiceImpl implements HoldingService {
         PageRequest pageRequest = PageRequest.of(
                 page,
                 size,
-                Sort.by(Sort.Direction.ASC, "holdingId")
+                Sort.by(Sort.Direction.DESC, "holdingId")
         );
 
         return holdingRepository
@@ -91,12 +97,12 @@ public class HoldingServiceImpl implements HoldingService {
 
     private HoldingResponse convertToResponse(Holding holding) {
 
-                Instrument instrument = holding.getInstrument();
-                String ticker = instrument.getTicker();
-                String assetClass = instrument.getAssetClass() == null ? null : instrument.getAssetClass().name();
+        Instrument instrument = holding.getInstrument();
+        String ticker = instrument.getTicker();
+        String assetClass = instrument.getAssetClass() == null ? null : instrument.getAssetClass().name();
 
         BigDecimal currentPrice =
-                                getCurrentPriceOrThrow(ticker);
+                getCurrentPriceWithFallback(instrument);
 
 
         BigDecimal currentValue =
@@ -181,7 +187,7 @@ public class HoldingServiceImpl implements HoldingService {
                 ));
 
         BigDecimal currentPrice =
-                getCurrentPriceOrThrow(instrument.getTicker());
+                getCurrentPriceWithFallback(instrument);
 
         Holding holding = holdingRepository
                 .findByPortfolio_PortfolioIdAndInstrument_InstrumentId(
@@ -244,16 +250,19 @@ public class HoldingServiceImpl implements HoldingService {
     }
 
 
-        private BigDecimal getCurrentPriceOrThrow(String ticker) {
-                try {
-                        return yahooFinanceService.getCurrentPrice(ticker);
-                } catch (RuntimeException exception) {
-                        throw new ResponseStatusException(
-                                        HttpStatus.BAD_GATEWAY,
-                                        "Unable to fetch live market data for " + ticker,
-                                        exception
-                        );
-                }
+    private BigDecimal getCurrentPriceWithFallback(Instrument instrument) {
+        try {
+            return yahooFinanceService.getCurrentPrice(instrument.getTicker());
+        } catch (RuntimeException exception) {
+            return priceRepository
+                    .findTopByInstrument_InstrumentIdOrderByPriceDateDesc(instrument.getInstrumentId())
+                    .map(Price_History::getClosePrice)
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.BAD_GATEWAY,
+                            "Unable to fetch live market data for " + instrument.getTicker(),
+                            exception
+                    ));
+        }
         }
 
 }
