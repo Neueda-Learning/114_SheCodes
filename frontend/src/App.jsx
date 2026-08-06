@@ -40,6 +40,7 @@ import {
   getPerformanceHoldings,
   getPerformanceSummary,
   getPerformanceTopWorstHistory,
+  getPortfolioSummaryExport,
   getPortfolioSnapshot,
   getRiskConcentration,
   getRiskMaxDrawdown,
@@ -160,8 +161,10 @@ function App() {
     updatingId: null,
     importing: false,
     exporting: false,
+    exportingSummary: false,
     error: '',
   })
+  const [dashboardAction, setDashboardAction] = useState('import-holdings')
   const [toastState, setToastState] = useState({
     visible: false,
     message: '',
@@ -273,15 +276,14 @@ function App() {
       concentrationAlerts: concentrationResult.status === 'fulfilled' ? concentrationResult.value : [],
     }
 
-    const failures = [
-      summaryResult,
-      holdingsResult,
-      comparisonResult,
-      volatilityResult,
-      drawdownResult,
-      concentrationResult,
-    ].filter((result) => result.status === 'rejected')
-    const error = failures.length > 0 ? 'Some analytics endpoints were unavailable; showing partial analytics.' : ''
+    const performanceFailures = [summaryResult, holdingsResult, comparisonResult].filter(
+      (result) => result.status === 'rejected'
+    )
+
+    const error =
+      performanceFailures.length > 0
+        ? 'Performance analytics endpoints were unavailable; showing partial analytics.'
+        : ''
 
     return { performance, risk, error }
   }
@@ -843,6 +845,161 @@ function App() {
     }
   }
 
+  async function handleExportPortfolioSummaryPdf() {
+    setActionState((current) => ({ ...current, exportingSummary: true, error: '' }))
+
+    try {
+      const range = mapFrameToPerformanceRange(performanceFrame)
+      const exportPayload = await getPortfolioSummaryExport(portfolioId, range, 365, 0.25)
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+
+      const dashboardData = exportPayload?.dashboard
+      const performanceSummary = exportPayload?.performanceSummary
+      const performanceHoldings = Array.isArray(exportPayload?.performanceHoldings) ? exportPayload.performanceHoldings : []
+      const allocationSlices = Array.isArray(dashboardData?.sectorAllocation) ? dashboardData.sectorAllocation : []
+      const riskData = exportPayload?.risk
+
+      doc.setFontSize(16)
+      doc.text('Portfolio Summary Report', 40, 48)
+      doc.setFontSize(10)
+      doc.text(`As of ${formatDateLabel(dashboardData?.asOf)}`, 40, 66)
+      doc.text(`Portfolio ID: ${portfolioId}`, 40, 82)
+      doc.text(`Performance range: ${exportPayload?.range ?? range}`, 40, 98)
+
+      autoTable(doc, {
+        startY: 114,
+        head: [['Dashboard metric', 'Value']],
+        body: [
+          ['Current total asset value', formatCurrency(dashboardData?.totalAssetsCurrentValue ?? dashboardData?.totalPortfolioValue)],
+          ['Total invested value', formatCurrency(dashboardData?.totalAssetsInvestedValue ?? dashboardData?.totalInvestedAmount)],
+          ['Total return', `${formatSignedCurrency(dashboardData?.totalReturnAmount)} (${formatPercent(dashboardData?.totalReturnPercentage, 1)})`],
+          ['Day return', `${formatSignedCurrency(dashboardData?.dayReturnAmount)} (${formatPercent(dashboardData?.dayReturnPercentage, 1)})`],
+          ['Holdings count', String(dashboardData?.holdingsCount ?? 0)],
+        ],
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [13, 23, 38] },
+      })
+
+      if (allocationSlices.length > 0) {
+        autoTable(doc, {
+          startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+          head: [['Asset allocation', 'Current value', 'Weight']],
+          body: allocationSlices.map((slice) => [
+            slice.label,
+            formatCurrency(slice.value, dashboardData?.baseCurrency),
+            formatPercent(slice.percentage, 2),
+          ]),
+          styles: { fontSize: 9, cellPadding: 6 },
+          headStyles: { fillColor: [13, 23, 38] },
+        })
+      }
+
+      autoTable(doc, {
+        startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+        head: [['Performance summary', 'Value']],
+        body: [
+          [
+            'Best performer',
+            `${performanceSummary?.bestPerformer?.ticker ?? 'N/A'} (${formatPercent(
+              performanceSummary?.bestPerformer?.returnPercentage,
+              2
+            )})`,
+          ],
+          [
+            'Worst performer',
+            `${performanceSummary?.worstPerformer?.ticker ?? 'N/A'} (${formatPercent(
+              performanceSummary?.worstPerformer?.returnPercentage,
+              2
+            )})`,
+          ],
+        ],
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [13, 23, 38] },
+      })
+
+      autoTable(doc, {
+        startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+        head: [['Ticker', 'Range return', 'Total return', 'Current value']],
+        body: performanceHoldings.slice(0, 12).map((holding) => [
+          holding.ticker,
+          formatSignedPercent(holding.rangeReturnPercentage, 2),
+          formatSignedPercent(holding.totalReturnPercentage, 2),
+          formatCurrency(holding.currentValue),
+        ]),
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [13, 23, 38] },
+      })
+
+      const portfolioVolatility = toNumber(riskData?.volatility?.portfolioVolatility) * 100
+      const maxDrawdown = toNumber(riskData?.maxDrawdown) * 100
+      const concentrationAlerts = Array.isArray(riskData?.concentrationAlerts) ? riskData.concentrationAlerts : []
+
+      autoTable(doc, {
+        startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+        head: [['Risk analysis', 'Value']],
+        body: [
+          ['Portfolio volatility (annualized)', formatPercent(portfolioVolatility, 2)],
+          ['Max drawdown', formatPercent(maxDrawdown, 2)],
+        ],
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [13, 23, 38] },
+      })
+
+      if (concentrationAlerts.length > 0) {
+        autoTable(doc, {
+          startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+          head: [['Ticker', 'Current weight', 'Threshold']],
+          body: concentrationAlerts.map((alert) => [
+            alert.ticker,
+            formatPercent(toNumber(alert.currentWeight) * 100, 2),
+            formatPercent(toNumber(alert.threshold) * 100, 2),
+          ]),
+          styles: { fontSize: 9, cellPadding: 6 },
+          headStyles: { fillColor: [13, 23, 38] },
+        })
+      } else {
+        autoTable(doc, {
+          startY: (doc.lastAutoTable?.finalY ?? 114) + 20,
+          body: [['No concentration alerts for selected threshold.']],
+          styles: { fontSize: 9, cellPadding: 6 },
+          theme: 'plain',
+        })
+      }
+
+      const datePart = new Date().toISOString().slice(0, 10)
+      doc.save(`portfolio-summary-${datePart}.pdf`)
+      showToast('Portfolio summary PDF exported.', 'success')
+    } catch (error) {
+      setActionState((current) => ({
+        ...current,
+        error: error.message,
+      }))
+      showToast(`Export summary failed: ${error.message}`, 'error')
+    } finally {
+      setActionState((current) => ({
+        ...current,
+        exportingSummary: false,
+      }))
+    }
+  }
+
+  function handleDashboardActionRun() {
+    if (dashboardAction === 'import-holdings') {
+      handleImportCsvClick()
+      return
+    }
+
+    if (dashboardAction === 'export-statement') {
+      handleExportStatementPdf()
+      return
+    }
+
+    if (dashboardAction === 'export-summary') {
+      handleExportPortfolioSummaryPdf()
+    }
+  }
+
   const snapshot = portfolioState.snapshot
   const dashboard = snapshot?.dashboard
   const holdingsView = buildHoldingsView(snapshot?.holdings ?? [], snapshot?.instruments ?? [])
@@ -905,6 +1062,7 @@ function App() {
     ? holdingsPageState.items
     : filteredHoldings.slice((activeHoldingsPage - 1) * holdingsPageSize, activeHoldingsPage * holdingsPageSize)
   const holdingsTotalItems = isServerPaginatedHoldings ? holdingsPageState.totalItems : filteredHoldings.length
+  const isDashboardActionRunning = actionState.importing || actionState.exporting || actionState.exportingSummary
 
   useEffect(() => {
     setHoldingsPage((current) => Math.min(current, holdingsTotalPages))
@@ -963,24 +1121,6 @@ function App() {
             />
             <button
               type="button"
-              className="ghost-button"
-              onClick={handleImportCsvClick}
-              disabled={actionState.importing || portfolioState.mode === 'demo'}
-            >
-              {actionState.importing ? <LoaderCircle size={16} className="spin" /> : <Upload size={16} />}
-              {actionState.importing ? 'Importing CSV...' : 'Import holdings CSV'}
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleExportStatementPdf}
-              disabled={actionState.exporting}
-            >
-              <Download size={16} />
-              {actionState.exporting ? 'Exporting PDF...' : 'Export statement PDF'}
-            </button>
-            <button
-              type="button"
               className="accent-button"
               onClick={() => {
                 logCustomerAction('add_holding_form_opened', { source: 'header_button' })
@@ -989,6 +1129,36 @@ function App() {
             >
               + Add holding
             </button>
+
+            <div className="dashboard-action-row hero-dropdown-row">
+              <select
+                id="dashboard-action-select"
+                className="dashboard-action-select"
+                aria-label="Header action"
+                value={dashboardAction}
+                onChange={(event) => setDashboardAction(event.target.value)}
+              >
+                <option value="import-holdings">Import holdings</option>
+                <option value="export-statement">Export statements</option>
+                <option value="export-summary">Export portfolio summary</option>
+              </select>
+
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleDashboardActionRun}
+                disabled={isDashboardActionRunning || (dashboardAction === 'import-holdings' && portfolioState.mode === 'demo')}
+              >
+                {isDashboardActionRunning ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}
+                {actionState.importing
+                  ? 'Importing CSV...'
+                  : actionState.exporting
+                    ? 'Exporting statement...'
+                    : actionState.exportingSummary
+                      ? 'Exporting summary...'
+                      : 'Run action'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1098,6 +1268,7 @@ function App() {
             healthLabel={healthLabel}
             valueSeriesCount={valueSeries.length}
             latestSeriesDate={latestValuePoint?.date}
+            mode={portfolioState.mode}
           />
         ) : null}
 
@@ -1549,17 +1720,21 @@ function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtreme
   return (
     <section className="page-stack">
       <div className="page-heading compact">
-        <p className="section-label">Analyze</p>
-        <h1>Performance</h1>
+        <p className="section-label">Performance</p>
+        <h1>Top vs Worst</h1>
       </div>
 
-      <section className="panel chart-panel performance-panel">
-        <div className="performance-controls">
-          <label className="range-select-shell" htmlFor="performance-range-select">
-            <span className="section-label">Time range</span>
+      <section className="panel chart-panel">
+        <div className="panel-header">
+          <div>
+            <p className="section-label">Range</p>
+            <h2>Comparative return graph</h2>
+          </div>
+
+          <label className="page-size-shell" htmlFor="performance-range-select">
+            Timeframe
             <select
               id="performance-range-select"
-              className="range-select"
               value={frame}
               onChange={(event) => setFrame(event.target.value)}
             >
