@@ -21,27 +21,35 @@ export function toNumber(value) {
   return Number(value ?? 0)
 }
 
-export function formatCurrency(value) {
-  return new Intl.NumberFormat('en-US', {
+export function formatCurrency(value, currency = 'USD', rate = 1) {
+  const normalizedCurrency = String(currency ?? 'USD').toUpperCase()
+  const showInr = normalizedCurrency === 'INR'
+  const convertedValue = toNumber(value) * (showInr ? (toNumber(rate) || 1) : 1)
+
+  return new Intl.NumberFormat(showInr ? 'en-IN' : 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: showInr ? 'INR' : 'USD',
     maximumFractionDigits: 2,
-  }).format(toNumber(value))
+  }).format(convertedValue)
 }
 
-export function formatCompactCurrency(value) {
-  return new Intl.NumberFormat('en-US', {
+export function formatCompactCurrency(value, currency = 'USD', rate = 1) {
+  const normalizedCurrency = String(currency ?? 'USD').toUpperCase()
+  const showInr = normalizedCurrency === 'INR'
+  const convertedValue = toNumber(value) * (showInr ? (toNumber(rate) || 1) : 1)
+
+  return new Intl.NumberFormat(showInr ? 'en-IN' : 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: showInr ? 'INR' : 'USD',
     notation: 'compact',
     maximumFractionDigits: 2,
-  }).format(toNumber(value))
+  }).format(convertedValue)
 }
 
-export function formatSignedCurrency(value) {
+export function formatSignedCurrency(value, currency = 'USD', rate = 1) {
   const amount = toNumber(value)
   const sign = amount >= 0 ? '+' : '-'
-  return `${sign}${formatCurrency(Math.abs(amount))}`
+  return `${sign}${formatCurrency(Math.abs(amount), currency, rate)}`
 }
 
 export function formatPercent(value, digits = 2) {
