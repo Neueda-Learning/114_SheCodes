@@ -1,0 +1,11 @@
+During the second meeting with the customer, some additional features were requested for the Portfolio_Manager.
+1. Change Currency from Dollar to INR
+Currently, portfolio values are displayed in Dollars ($).
+The customer wants all values to be displayed in Indian Rupees (₹ INR).
+2.Import Holdings Using CSV File
+Users should be able to add multiple holdings at once by uploading a CSV file.
+This will save time compared to adding each holding manually.
+3.Export Holdings Statement as PDF
+Users should be able to download their holdings details as a PDF report.
+4.Export Portfolio Summary as PDF
+Users should be able to export a complete summary of their portfolio.
