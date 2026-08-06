@@ -640,10 +640,10 @@ function App() {
       return false
     }
 
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    if (!Number.isFinite(quantity) || quantity < 1 || !Number.isInteger(quantity)) {
       setActionState((current) => ({
         ...current,
-        error: 'Quantity must be greater than zero.',
+        error: 'Quantity must be a whole number greater than 0.',
       }))
       return false
     }
@@ -655,7 +655,7 @@ function App() {
     }))
 
     try {
-      const updatedHolding = await updateHoldingQuantity(holdingId, { quantity })
+      const updatedHolding = await updateHoldingQuantity(holdingId, { quantity: Math.trunc(quantity) })
       if (updatedHolding?.holdingId) {
         mergeHoldingIntoSnapshot(updatedHolding)
         mergeHoldingIntoVisiblePage(updatedHolding)
@@ -730,7 +730,11 @@ function App() {
         if (row.instrumentIdRaw) {
           const parsedId = Number(row.instrumentIdRaw)
           if (Number.isFinite(parsedId) && parsedId > 0) {
+            // numeric value → treat as database instrument ID
             instrumentId = parsedId
+          } else {
+            // non-numeric value in instrument column (e.g. "AAPL") → treat as ticker
+            instrumentId = instrumentByTicker.get(row.instrumentIdRaw.toUpperCase()) ?? null
           }
         }
 
@@ -1107,8 +1111,7 @@ function App() {
       <header className="hero-shell">
         <div className="hero-topline">
           <div>
-            <p className="brand-mark">SheCodes.</p>
-            <p className="brand-subcopy">Portfolio manager v0.1 prototype</p>
+            <p className="brand-mark">SheCodes</p>
           </div>
 
           <div className="hero-actions">
@@ -1197,7 +1200,6 @@ function App() {
           <section className="panel add-holding-panel">
             <div className="panel-header">
               <div>
-                <p className="section-label">Trade entry</p>
                 <h2>Add a new holding</h2>
               </div>
               <BriefcaseBusiness size={20} className="panel-icon" />
@@ -1255,6 +1257,35 @@ function App() {
           </section>
         ) : null}
 
+        {activeTab !== 'risk' ? (
+          <div className="persistent-metrics-bar">
+            <div className="metric-grid">
+              <MetricCard
+                label="Current total asset value"
+                value={formatCurrency(dashboard?.totalAssetsCurrentValue ?? dashboard?.totalPortfolioValue, dashboard?.baseCurrency)}
+                hint={`${formatSignedCurrency(dashboard?.dayReturnAmount)} today`}
+                positive={toNumber(dashboard?.dayReturnAmount) >= 0}
+              />
+              <MetricCard
+                label="Total invested value"
+                value={formatCurrency(dashboard?.totalAssetsInvestedValue ?? dashboard?.totalInvestedAmount, dashboard?.baseCurrency)}
+                hint="Value at time of investment"
+              />
+              <MetricCard
+                label="Total P&L"
+                value={formatPercent(dashboard?.totalReturnPercentage, 1)}
+                hint={`${formatSignedCurrency(dashboard?.totalReturnAmount)} since inception`}
+                positive={toNumber(dashboard?.totalReturnAmount) >= 0}
+              />
+              <MetricCard
+                label="Holdings"
+                value={String(dashboard?.holdingsCount ?? 0)}
+                hint={`${dashboard?.stockCount ?? 0} stocks, ${(dashboard?.etfCount ?? 0) + (dashboard?.bondCount ?? 0)} funds`}
+              />
+            </div>
+          </div>
+        ) : null}
+
         {activeTab === 'dashboard' ? (
           <DashboardTab
             greeting={dashboardGreeting}
@@ -1268,7 +1299,6 @@ function App() {
             healthLabel={healthLabel}
             valueSeriesCount={valueSeries.length}
             latestSeriesDate={latestValuePoint?.date}
-            mode={portfolioState.mode}
           />
         ) : null}
 
@@ -1365,43 +1395,16 @@ function DashboardTab({
   return (
     <section className="page-stack">
       <div className="page-heading">
-        <p className="section-label">Overview</p>
         <h1>{greeting}</h1>
         <p className="page-subtitle">
           As of {formatDateLabel(dashboard?.asOf)} | Base currency USD
         </p>
       </div>
 
-      <div className="metric-grid">
-        <MetricCard
-          label="Current total asset value"
-          value={formatCurrency(dashboard?.totalAssetsCurrentValue ?? dashboard?.totalPortfolioValue, dashboard?.baseCurrency)}
-          hint={`${formatSignedCurrency(dashboard?.dayReturnAmount)} today`}
-          positive={toNumber(dashboard?.dayReturnAmount) >= 0}
-        />
-        <MetricCard
-          label="Total invested value"
-          value={formatCurrency(dashboard?.totalAssetsInvestedValue ?? dashboard?.totalInvestedAmount, dashboard?.baseCurrency)}
-          hint="Value at time of investment"
-        />
-        <MetricCard
-          label="Total return"
-          value={formatPercent(dashboard?.totalReturnPercentage, 1)}
-          hint={`${formatSignedCurrency(dashboard?.totalReturnAmount)} since inception`}
-          positive={toNumber(dashboard?.totalReturnAmount) >= 0}
-        />
-        <MetricCard
-          label="Holdings"
-          value={String(dashboard?.holdingsCount ?? 0)}
-          hint={`${dashboard?.stockCount ?? 0} stocks, ${(dashboard?.etfCount ?? 0) + (dashboard?.bondCount ?? 0)} funds`}
-        />
-      </div>
-
       <div className="chart-grid">
         <section className="panel chart-panel">
           <div className="panel-header">
             <div>
-              <p className="section-label">Trend</p>
               <h2>Portfolio value over time</h2>
               <p className="panel-copy">
                 {valueSeriesCount > 0
@@ -1409,9 +1412,9 @@ function DashboardTab({
                   : 'No historical points yet. Refresh prices to seed portfolio history.'}
               </p>
             </div>
-            <button type="button" className="ghost-button" onClick={onRefresh} disabled={isRefreshing || mode === 'demo'}>
+            <button type="button" className="panel-ghost-button" onClick={onRefresh} disabled={isRefreshing || mode === 'demo'}>
               <RefreshCcw size={16} className={isRefreshing ? 'spin' : ''} />
-              {isRefreshing ? 'Refreshing' : 'Refresh prices'}
+              {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
             </button>
           </div>
 
@@ -1446,7 +1449,6 @@ function DashboardTab({
         <section className="panel chart-panel">
           <div className="panel-header">
             <div>
-              <p className="section-label">Mix</p>
               <h2>Allocation by asset class</h2>
             </div>
             <CandlestickChart size={20} className="panel-icon" />
@@ -1518,9 +1520,15 @@ function HoldingsTab({
   const [editingError, setEditingError] = useState('')
 
   async function handleSaveUpdate(holdingId) {
-    const quantity = Number(editingQuantity)
+    const raw = editingQuantity.trim()
+    const quantity = Number(raw)
 
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    if (!raw || !/^\d+$/.test(raw)) {
+      setEditingError('Quantity must be a whole number (digits only, no decimals).')
+      return
+    }
+
+    if (quantity < 1) {
       setEditingError('Quantity must be greater than 0.')
       return
     }
@@ -1537,7 +1545,6 @@ function HoldingsTab({
   return (
     <section className="page-stack">
       <div className="page-heading compact">
-        <p className="section-label">Browse</p>
         <h1>Holdings</h1>
       </div>
 
@@ -1580,8 +1587,9 @@ function HoldingsTab({
           <span>Type</span>
           <span>Qty</span>
           <span>Avg. cost</span>
-          <span>Price</span>
-          <span>Market value</span>
+          <span>Investment total</span>
+          <span>Current    price</span>
+          <span>Current    value</span>
           <span>Gain/Loss</span>
           <span>Action</span>
         </div>
@@ -1613,10 +1621,18 @@ function HoldingsTab({
                   <input
                     className="inline-quantity-input"
                     type="number"
-                    min="0.01"
-                    step="0.01"
+                    min="1"
+                    step="1"
                     value={editingQuantity}
-                    onChange={(event) => setEditingQuantity(event.target.value)}
+                    onChange={(event) => {
+                      const raw = event.target.value
+                      if (raw === '' || /^\d+$/.test(raw)) {
+                        setEditingQuantity(raw)
+                        setEditingError('')
+                      } else {
+                        setEditingError('Quantity must be a whole number (no decimals).')
+                      }
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault()
@@ -1637,6 +1653,7 @@ function HoldingsTab({
                 )}
               </div>
               <div>{formatCurrency(holding.avgCost, holding.currency)}</div>
+              <div>{formatCurrency(holding.investedAmount, holding.currency)}</div>
               <div>{formatCurrency(holding.currentPrice, holding.currency)}</div>
               <div>{formatCurrency(holding.currentValue, holding.currency)}</div>
               <div className={holding.gainLossAmount >= 0 ? 'gain positive' : 'gain negative'}>
@@ -1721,7 +1738,7 @@ function PerformanceTab({ frame, setFrame, dashboard, series, performanceExtreme
     <section className="page-stack">
       <div className="page-heading compact">
         <p className="section-label">Performance</p>
-        <h1>Top vs Worst</h1>
+        <h1 className="heading-compact-sm">Top vs Worst</h1>
       </div>
 
       <section className="panel chart-panel">
@@ -1881,9 +1898,7 @@ function RiskTab({ dashboard, overview }) {
   return (
     <section className="page-stack">
       <div className="page-heading compact">
-        <p className="section-label">Explore</p>
         <h1>Risk analysis</h1>
-        <p className="page-subtitle">Portfolio posture, observations and discussion prompts for the client presentation.</p>
       </div>
 
       <div className="notice-strip">
@@ -1895,7 +1910,6 @@ function RiskTab({ dashboard, overview }) {
         <section className="panel risk-hero-card">
           <div className="panel-header">
             <div>
-              <p className="section-label">Overall posture</p>
               <h2>{overview.level} risk</h2>
             </div>
             <Sparkles size={18} className="panel-icon" />
@@ -1928,10 +1942,6 @@ function RiskTab({ dashboard, overview }) {
 
         {overview.observations.map((item) => (
           <section key={item.title} className="panel insight-card">
-            <div className="insight-heading">
-              {item.icon === 'brain' ? <BrainCircuit size={18} /> : <AlertTriangle size={18} />}
-              <p className="section-label">{item.confidence}</p>
-            </div>
             <h2>{item.title}</h2>
             <p className="panel-copy">{item.body}</p>
           </section>

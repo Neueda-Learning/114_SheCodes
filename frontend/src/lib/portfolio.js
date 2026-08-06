@@ -8,7 +8,7 @@ export const tabs = [
 ]
 
 export const performanceFrames = [
-  { id: 'day', label: 'Single Day', days: 1, sampleEvery: 1 },
+  { id: 'day', label: 'Today', days: 1, sampleEvery: 1 },
   { id: 'week', label: '7 Days', days: 7, sampleEvery: 1 },
   { id: 'month', label: '1 Month', days: 30, sampleEvery: 4 },
   { id: 'twice', label: '2 Months', days: 60, sampleEvery: 7 },
@@ -154,7 +154,17 @@ export function buildPerformanceSeries(valueOverTime, frameId) {
     value: toNumber(point.value),
   }))
   const sliced = points.slice(-frame.days)
-  const sampled = sliced.filter((point, index) => index === sliced.length - 1 || index % frame.sampleEvery === 0)
+
+  let sampled
+  if (frame.id === 'year') {
+    const byMonth = new Map()
+    for (const point of sliced) {
+      byMonth.set(point.date.slice(0, 7), point)
+    }
+    sampled = Array.from(byMonth.values())
+  } else {
+    sampled = sliced.filter((point, index) => index === sliced.length - 1 || index % frame.sampleEvery === 0)
+  }
 
   return sampled.map((point) => ({
     ...point,
@@ -237,12 +247,26 @@ export function buildTopWorstSeriesFromApi(comparisonResponse, frameId) {
     }
   }
 
-  return Array.from(byDate.values())
+  const sorted = Array.from(byDate.values())
     .sort((left, right) => left.date.localeCompare(right.date))
-    .map((point) => ({
-      ...point,
-      label: formatAxisDate(point.date, frameId),
-    }))
+
+  let sampled
+  if (frameId === 'year') {
+    const byMonth = new Map()
+    for (const point of sorted) {
+      byMonth.set(point.date.slice(0, 7), point)
+    }
+    sampled = Array.from(byMonth.values())
+  } else {
+    const frame = performanceFrames.find((candidate) => candidate.id === frameId)
+    const sampleEvery = frame?.sampleEvery ?? 1
+    sampled = sorted.filter((_, index) => index === sorted.length - 1 || index % sampleEvery === 0)
+  }
+
+  return sampled.map((point) => ({
+    ...point,
+    label: formatAxisDate(point.date, frameId),
+  }))
 }
 
 function formatAxisDate(value, frameId) {
