@@ -377,6 +377,12 @@ h2,
   gap: 24px;
 }
 
+.persistent-metrics-bar {
+  padding: 24px 28px 32px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 32px;
+}
+
 .page-heading h1 {
   margin: 0;
   font-size: clamp(2.5rem, 5vw, 4rem);
@@ -386,6 +392,12 @@ h2,
 
 .page-heading.compact h1 {
   font-size: clamp(2.3rem, 4vw, 3.5rem);
+}
+
+.heading-compact-sm {
+  font-size: clamp(1.3rem, 2.5vw, 1.9rem);
+  letter-spacing: -0.02em;
+  margin: 0;
 }
 
 .page-subtitle,
@@ -637,7 +649,7 @@ h2,
 .table-headings,
 .table-row {
   display: grid;
-  grid-template-columns: 1.6fr 0.9fr 0.8fr 1fr 1fr 1.2fr 1.2fr 0.8fr;
+  grid-template-columns: 1.4fr 0.8fr 0.7fr 0.9fr 1fr 0.9fr 1fr 1.1fr 0.8fr;
   gap: 16px;
   padding: 18px 22px;
   min-width: 980px;

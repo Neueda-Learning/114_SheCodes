@@ -227,7 +227,7 @@ public class HoldingServiceImpl implements HoldingService {
                         "Holding not found: " + holdingId
                 ));
 
-        holding.setQuantity(request.getQuantity());
+        holding.setQuantity(BigDecimal.valueOf(request.getQuantity()));
 
         Holding savedHolding = holdingRepository.save(holding);
         return convertToResponse(savedHolding);
