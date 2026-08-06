@@ -143,7 +143,7 @@ public class YahooFinanceService {
             JsonNode root = objectMapper.readTree(response);
             JsonNode result = root.path("chart").path("result").path(0);
             JsonNode timestamps = result.path("timestamp");
-            JsonNode closes = result.path("indicators").path("quote").path(0).path("close");
+            JsonNode closes = result.path("indicators").path("adjclose").path(0).path("adjclose");
 
             if (!timestamps.isArray() || !closes.isArray()) {
                 throw new IllegalStateException("Historical price series not found for symbol: " + normalizedSymbol);

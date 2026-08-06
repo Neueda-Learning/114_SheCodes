@@ -1,0 +1,14 @@
+# Place at project ROOT, alongside the backend Dockerfile.
+# Keeps these out of the Docker build context — faster builds, no stale
+# compiled classes or IDE state accidentally baked into the image.
+
+target/
+.idea/
+*.iml
+.git/
+.gitignore
+*.log
+frontend/
+Dockerfile
+docker-compose.yml
+.env
