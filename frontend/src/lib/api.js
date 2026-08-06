@@ -118,6 +118,12 @@ export function getPerformanceTopWorstHistory(portfolioId, range = '1M') {
   return apiRequest(`/portfolio/${portfolioId}/performance/top-worst-history?range=${encodeURIComponent(range)}`)
 }
 
+export function getPortfolioSummaryExport(portfolioId, range = '1M', days = 365, threshold = 0.25) {
+  return apiRequest(
+    `/portfolio/${portfolioId}/dashboard/export-summary?range=${encodeURIComponent(range)}&days=${days}&threshold=${threshold}`
+  )
+}
+
 export function getRiskVolatility(annualize = true) {
   return apiRequest(`/risk/volatility?annualize=${annualize}`)
 }

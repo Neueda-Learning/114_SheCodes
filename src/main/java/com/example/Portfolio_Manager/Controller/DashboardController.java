@@ -1,7 +1,9 @@
 package com.example.Portfolio_Manager.Controller;
 
 import com.example.Portfolio_Manager.Sevice.PortfolioAnalyticsService;
+import com.example.Portfolio_Manager.Sevice.PortfolioSummaryExportService;
 import com.example.Portfolio_Manager.dto.DashboardResponse;
+import com.example.Portfolio_Manager.dto.PortfolioSummaryExportResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,9 +24,14 @@ import java.util.Map;
 public class DashboardController {
 
     private final PortfolioAnalyticsService portfolioAnalyticsService;
+        private final PortfolioSummaryExportService portfolioSummaryExportService;
 
-    public DashboardController(PortfolioAnalyticsService portfolioAnalyticsService) {
+        public DashboardController(
+                        PortfolioAnalyticsService portfolioAnalyticsService,
+                        PortfolioSummaryExportService portfolioSummaryExportService
+        ) {
         this.portfolioAnalyticsService = portfolioAnalyticsService;
+                this.portfolioSummaryExportService = portfolioSummaryExportService;
     }
 
     @Operation(
@@ -50,4 +57,18 @@ public class DashboardController {
     ) {
         return portfolioAnalyticsService.refreshPriceHistory(portfolioId, days);
     }
+
+        @Operation(
+                        summary = "Get portfolio summary export payload",
+                        description = "Returns dashboard, performance and risk analytics in one response for PDF export"
+        )
+        @GetMapping("/export-summary")
+        public PortfolioSummaryExportResponse getPortfolioSummaryExport(
+                        @PathVariable Long portfolioId,
+                        @RequestParam(defaultValue = "1M") String range,
+                        @RequestParam(defaultValue = "365") int days,
+                        @RequestParam(defaultValue = "0.25") double threshold
+        ) {
+                return portfolioSummaryExportService.getSummary(portfolioId, range, days, threshold);
+        }
 }

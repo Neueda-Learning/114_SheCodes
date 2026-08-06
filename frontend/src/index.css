@@ -410,6 +410,33 @@ h2,
   color: #617b90;
 }
 
+.dashboard-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-action-select {
+  min-width: 260px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f3347;
+}
+
+.hero-dropdown-row .dashboard-action-select {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #1f3347;
+}
+
+.dashboard-action-select option {
+  color: #1f3347;
+  background: #ffffff;
+}
+
 .quick-insights-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
