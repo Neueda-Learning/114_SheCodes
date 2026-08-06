@@ -1,32 +1,30 @@
- Holdings Module
+Dashboard Module
 
- Overview
+=> The Dashboard Module provides a consolidated, at-a-glance view of portfolio health. 
+=> It summarizes portfolio value, returns, holdings composition, cash exposure, sector allocation, and recent value trend using real-time and historical market data.
 
-The Holdings Module is responsible for managing and displaying the investments held in a user's portfolio. It allows users to add, view, and remove holdings while fetching **real-time market data from Yahoo Finance** to keep current prices and portfolio values up to date.
+Features
+- Portfolio Summary Cards — Displays:
+  - Total portfolio value
+  - Total invested amount
+  - Total profit&loss (amount and %)
+  - Invested %
+  
+- Holdings Summary — Displays:
+  - Holdings count
+  - Total assets count
+  - Total quantity
+  - Asset-class counts (Stock, ETF, Bond)
+- Value Over Time: Returns date-wise portfolio values for chart plotting over selected days.
+- Sector Allocation: Returns sector-wise distribution (value and percentage) for pie/donut charts.
+  
+- Historical Price Refresh — Pulls missing historical close-price rows from Yahoo Finance into local DB for better chart consistency.
 
- Features
+APIs
 
-View Holdings — Displays all investments with details such as ticker, quantity, average cost, current price, market value, and gain/loss.
-Add Holding — Allows users to add a new stock/investment to their portfolio.
-Remove Holding — Allows users to remove an existing investment.
-Real-Time Market Data — Fetches the latest stock prices and relevant market information from Yahoo Finance using the instrument's ticker symbol.
-Gain/Loss Calculation — Calculates the current value and performance of holdings using the latest market price.
+GET  /api/portfolio/{portfolioId}/dashboard?days={n}
+POST /api/portfolio/{portfolioId}/dashboard/refresh-prices?days={n}
 
- APIs
-
-text
-GET    /api/holdings
-POST   /api/holdings
-DELETE /api/holdings/{id}
-
-
- Technology
-
- Java
- Spring Boot
- Spring Data JPA / Hibernate
- MySQL
- REST APIs
- Yahoo Finance market data
-
-This module provides the current investment and market-price data required by the Dashboard, Performance, and Risk Analysis modules.
+- Dashboard uses live prices when available and falls back to stored historical prices when needed.
+- refresh-prices does not modify holding quantity or average cost.
+- Risk Analysis and Top/Worst Performance logic are excluded from this module scope.
