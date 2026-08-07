@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-The system lets a user track investment holdings (stocks, ETFs, bonds, cash) inside a portfolio, pull live and historical prices from Yahoo Finance, view a dashboard of portfolio value/return/allocation, compare holding performance over selectable time ranges, and run risk analysis (volatility, max drawdown, concentration) against the portfolio. A portfolio summary can also be exported (dashboard + performance + risk combined into one response, and rendered client-side as a PDF).
+The system lets a user track investment holdings (stocks, ETFs, bonds, cash) inside a portfolio, pulling the live and historical prices from Yahoo Finance, view a dashboard of portfolio value/return/allocation, compare holding performance over selectable time ranges, and run risk analysis (volatility, max drawdown, concentration) against the portfolio. A portfolio summary can also be exported (dashboard + performance + risk combined into one response, and rendered client-side as a PDF).
 
 There is currently no login, registration, or multi-user concept — every endpoint operates directly on a `portfolioId` path variable with no authentication layer in front of it.
 
