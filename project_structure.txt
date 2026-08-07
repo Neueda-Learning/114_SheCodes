@@ -9,6 +9,7 @@ C:.
 |   desc.md
 |   docker-compose.yml
 |   DOCKER.md
+|   Dockerfile
 |   holdings_past_history_import.csv
 |   holdings_past_history_import_guide.pdf
 |   Jenkinsfile
@@ -16,9 +17,11 @@ C:.
 |   Kanban-Board
 |   Meeting1
 |   Meeting2
+|   mvnw
 |   mvnw.cmd
 |   new_file.md
 |   package-lock.json
+|   pom.xml
 |   portfolio_manager.md
 |   project_structure.txt
 |   README.md
@@ -42,111 +45,6 @@ C:.
 |           package.json
 |           _metadata.json
 |           
-+---backend
-|   |   Dockerfile
-|   |   mvnw
-|   |   pom.xml
-|   |   
-|   \---src
-|       +---.idea
-|       |       misc.xml
-|       |       modules.xml
-|       |       src.iml
-|       |       vcs.xml
-|       |       workspace.xml
-|       |       
-|       +---main
-|       |   |   main.iml
-|       |   |   
-|       |   +---java
-|       |   |   \---com
-|       |   |       \---example
-|       |   |           \---Portfolio_Manager
-|       |   |               |   PortfolioManagerApplication.java
-|       |   |               |   
-|       |   |               +---config
-|       |   |               |       InstrumentDataInitializer.java
-|       |   |               |       
-|       |   |               +---Controller
-|       |   |               |       DashboardController.java
-|       |   |               |       HoldingController.java
-|       |   |               |       InstrumentController.java
-|       |   |               |       MarketDataController.java
-|       |   |               |       PerformanceController.java
-|       |   |               |       RiskAnalysisController.java
-|       |   |               |       
-|       |   |               +---dto
-|       |   |               |       AddHoldingRequest.java
-|       |   |               |       DashboardResponse.java
-|       |   |               |       HoldingPerformanceResponse.java
-|       |   |               |       HoldingResponse.java
-|       |   |               |       HomeResponse.java
-|       |   |               |       InstrumentResponse.java
-|       |   |               |       PerformanceComparisonResponse.java
-|       |   |               |       PerformancePointResponse.java
-|       |   |               |       PerformanceResponse.java
-|       |   |               |       PerformanceSummaryResponse.java
-|       |   |               |       PerformerSnapshotResponse.java
-|       |   |               |       PortfolioSummaryExportResponse.java
-|       |   |               |       StockPriceResponse.java
-|       |   |               |       UpdateHoldingQuantityRequest.java
-|       |   |               |       
-|       |   |               +---Model
-|       |   |               |       AssetClass.java
-|       |   |               |       Holding.java
-|       |   |               |       Instrument.java
-|       |   |               |       Portfolio.java
-|       |   |               |       PriceHistory.java
-|       |   |               |       Price_History.java
-|       |   |               |       
-|       |   |               +---Repository
-|       |   |               |       HoldingRepository.java
-|       |   |               |       InstrumentRepository.java
-|       |   |               |       PortfolioRepository.java
-|       |   |               |       Price.java
-|       |   |               |       PriceHistoryRepository.java
-|       |   |               |       
-|       |   |               \---Sevice
-|       |   |                       HoldingService.java
-|       |   |                       HoldingServiceImpl.java
-|       |   |                       InstrumentService.java
-|       |   |                       InstrumentServiceImple.java
-|       |   |                       PerformanceService.java
-|       |   |                       PerformanceServiceImpl.java
-|       |   |                       Portfolio.java
-|       |   |                       PortfolioAnalyticsService.java
-|       |   |                       PortfolioAnalyticsServiceImpl.java
-|       |   |                       PortfolioSummaryExportService.java
-|       |   |                       PriceHistoryImportService.java
-|       |   |                       RiskAnalaysisServiceTest.java
-|       |   |                       RiskAnalysisService.java
-|       |   |                       YahooFinanceService.java
-|       |   |                       
-|       |   \---resources
-|       |       |   application.properties
-|       |       |   
-|       |       \---db
-|       |           \---migration
-|       |                   V1__init_schema.sql
-|       |                   V2__align_existing_schema.sql
-|       |                   V3__add_price_history_table.sql
-|       |                   
-|       \---test
-|           |   test.iml
-|           |   
-|           \---java
-|               \---com
-|                   \---example
-|                       \---Portfolio_Manager
-|                           |   PortfolioManagerApplicationTests.java
-|                           |   
-|                           +---Controller
-|                           |       HoldingControllerTest.java
-|                           |       
-|                           \---Sevice
-|                                   HoldingServiceImplTest.java
-|                                   RiskAnalysisServiceTest.java
-|                                   
 +---frontend
 |   |   .dockerignore
 |   |   .gitignore
@@ -182,8 +80,196 @@ C:.
 |               api.js
 |               portfolio.js
 |               
++---src
+|   +---.idea
+|   |       misc.xml
+|   |       modules.xml
+|   |       src.iml
+|   |       vcs.xml
+|   |       workspace.xml
+|   |       
+|   +---main
+|   |   |   main.iml
+|   |   |   
+|   |   +---java
+|   |   |   \---com
+|   |   |       \---example
+|   |   |           \---Portfolio_Manager
+|   |   |               |   PortfolioManagerApplication.java
+|   |   |               |   
+|   |   |               +---config
+|   |   |               |       InstrumentDataInitializer.java
+|   |   |               |       
+|   |   |               +---Controller
+|   |   |               |       DashboardController.java
+|   |   |               |       HoldingController.java
+|   |   |               |       InstrumentController.java
+|   |   |               |       MarketDataController.java
+|   |   |               |       PerformanceController.java
+|   |   |               |       RiskAnalysisController.java
+|   |   |               |       
+|   |   |               +---dto
+|   |   |               |       AddHoldingRequest.java
+|   |   |               |       DashboardResponse.java
+|   |   |               |       HoldingPerformanceResponse.java
+|   |   |               |       HoldingResponse.java
+|   |   |               |       HomeResponse.java
+|   |   |               |       InstrumentResponse.java
+|   |   |               |       PerformanceComparisonResponse.java
+|   |   |               |       PerformancePointResponse.java
+|   |   |               |       PerformanceResponse.java
+|   |   |               |       PerformanceSummaryResponse.java
+|   |   |               |       PerformerSnapshotResponse.java
+|   |   |               |       PortfolioSummaryExportResponse.java
+|   |   |               |       StockPriceResponse.java
+|   |   |               |       UpdateHoldingQuantityRequest.java
+|   |   |               |       
+|   |   |               +---Model
+|   |   |               |       AssetClass.java
+|   |   |               |       Holding.java
+|   |   |               |       Instrument.java
+|   |   |               |       Portfolio.java
+|   |   |               |       PriceHistory.java
+|   |   |               |       Price_History.java
+|   |   |               |       
+|   |   |               +---Repository
+|   |   |               |       HoldingRepository.java
+|   |   |               |       InstrumentRepository.java
+|   |   |               |       PortfolioRepository.java
+|   |   |               |       Price.java
+|   |   |               |       PriceHistoryRepository.java
+|   |   |               |       
+|   |   |               \---Sevice
+|   |   |                       HoldingService.java
+|   |   |                       HoldingServiceImpl.java
+|   |   |                       InstrumentService.java
+|   |   |                       InstrumentServiceImple.java
+|   |   |                       PerformanceService.java
+|   |   |                       PerformanceServiceImpl.java
+|   |   |                       Portfolio.java
+|   |   |                       PortfolioAnalyticsService.java
+|   |   |                       PortfolioAnalyticsServiceImpl.java
+|   |   |                       PortfolioSummaryExportService.java
+|   |   |                       PriceHistoryImportService.java
+|   |   |                       RiskAnalaysisServiceTest.java
+|   |   |                       RiskAnalysisService.java
+|   |   |                       YahooFinanceService.java
+|   |   |                       
+|   |   \---resources
+|   |       |   application.properties
+|   |       |   
+|   |       \---db
+|   |           \---migration
+|   |                   V1__init_schema.sql
+|   |                   V2__align_existing_schema.sql
+|   |                   V3__add_price_history_table.sql
+|   |                   
+|   \---test
+|       |   test.iml
+|       |   
+|       \---java
+|           \---com
+|               \---example
+|                   \---Portfolio_Manager
+|                       |   PortfolioManagerApplicationTests.java
+|                       |   
+|                       +---Controller
+|                       |       HoldingControllerTest.java
+|                       |       
+|                       \---Sevice
+|                               HoldingServiceImplTest.java
+|                               RiskAnalysisServiceTest.java
+|                               
 \---target
     +---classes
+    |   |   application.properties
+    |   |   
+    |   +---com
+    |   |   \---example
+    |   |       \---Portfolio_Manager
+    |   |           |   PortfolioManagerApplication.class
+    |   |           |   
+    |   |           +---config
+    |   |           |       InstrumentDataInitializer.class
+    |   |           |       
+    |   |           +---Controller
+    |   |           |       DashboardController.class
+    |   |           |       HoldingController.class
+    |   |           |       InstrumentController.class
+    |   |           |       MarketDataController.class
+    |   |           |       PerformanceController.class
+    |   |           |       RiskAnalysisController.class
+    |   |           |       
+    |   |           +---dto
+    |   |           |       AddHoldingRequest.class
+    |   |           |       DashboardResponse$AllocationSlice.class
+    |   |           |       DashboardResponse$ValuePoint.class
+    |   |           |       DashboardResponse.class
+    |   |           |       HoldingPerformanceResponse.class
+    |   |           |       HoldingResponse.class
+    |   |           |       HomeResponse.class
+    |   |           |       InstrumentResponse.class
+    |   |           |       PerformanceComparisonResponse.class
+    |   |           |       PerformancePointResponse.class
+    |   |           |       PerformanceResponse.class
+    |   |           |       PerformanceSummaryResponse.class
+    |   |           |       PerformerSnapshotResponse.class
+    |   |           |       PortfolioSummaryExportResponse$ConcentrationAlertSummary.class
+    |   |           |       PortfolioSummaryExportResponse$HoldingVolatilitySummary.class
+    |   |           |       PortfolioSummaryExportResponse$RiskSummary.class
+    |   |           |       PortfolioSummaryExportResponse$VolatilitySummary.class
+    |   |           |       PortfolioSummaryExportResponse.class
+    |   |           |       StockPriceResponse.class
+    |   |           |       UpdateHoldingQuantityRequest.class
+    |   |           |       
+    |   |           +---Model
+    |   |           |       AssetClass.class
+    |   |           |       Holding.class
+    |   |           |       Instrument.class
+    |   |           |       Portfolio.class
+    |   |           |       PriceHistory.class
+    |   |           |       Price_History.class
+    |   |           |       
+    |   |           +---Repository
+    |   |           |       HoldingRepository.class
+    |   |           |       InstrumentRepository.class
+    |   |           |       PortfolioRepository.class
+    |   |           |       Price.class
+    |   |           |       PriceHistoryRepository.class
+    |   |           |       
+    |   |           \---Sevice
+    |   |                   HoldingService.class
+    |   |                   HoldingServiceImpl.class
+    |   |                   InstrumentService.class
+    |   |                   InstrumentServiceImple.class
+    |   |                   PerformanceService.class
+    |   |                   PerformanceServiceImpl$HoldingMetrics.class
+    |   |                   PerformanceServiceImpl$PerformanceRange$1.class
+    |   |                   PerformanceServiceImpl$PerformanceRange$2.class
+    |   |                   PerformanceServiceImpl$PerformanceRange$3.class
+    |   |                   PerformanceServiceImpl$PerformanceRange$4.class
+    |   |                   PerformanceServiceImpl$PerformanceRange.class
+    |   |                   PerformanceServiceImpl.class
+    |   |                   Portfolio.class
+    |   |                   PortfolioAnalyticsService.class
+    |   |                   PortfolioAnalyticsServiceImpl$PriceLookupResult.class
+    |   |                   PortfolioAnalyticsServiceImpl.class
+    |   |                   PortfolioSummaryExportService.class
+    |   |                   PriceHistoryImportService.class
+    |   |                   RiskAnalysisService$ConcentrationAlert.class
+    |   |                   RiskAnalysisService$HoldingVolatility.class
+    |   |                   RiskAnalysisService$InsufficientDataException.class
+    |   |                   RiskAnalysisService$VolatilityReport.class
+    |   |                   RiskAnalysisService.class
+    |   |                   YahooFinanceService$CachedPrice.class
+    |   |                   YahooFinanceService.class
+    |   |                   
+    |   \---db
+    |       \---migration
+    |               V1__init_schema.sql
+    |               V2__align_existing_schema.sql
+    |               V3__add_price_history_table.sql
+    |               
     +---generated-sources
     |   \---annotations
     +---generated-test-sources
@@ -207,3 +293,15 @@ C:.
     |       TEST-com.example.Portfolio_Manager.Sevice.RiskAnalysisServiceTest.xml
     |       
     \---test-classes
+        \---com
+            \---example
+                \---Portfolio_Manager
+                    |   PortfolioManagerApplicationTests.class
+                    |   
+                    +---Controller
+                    |       HoldingControllerTest.class
+                    |       
+                    \---Sevice
+                            HoldingServiceImplTest.class
+                            RiskAnalysisServiceTest.class
+                            
