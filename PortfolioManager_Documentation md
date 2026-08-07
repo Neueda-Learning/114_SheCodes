@@ -1,0 +1,146 @@
+# Portfolio Manager —  Documentation
+
+**Project:** Portfolio-Manager
+**Type:** Full-stack investment portfolio tracking & risk analysis system
+**Backend:** Java 21, Spring Boot 4.1.0 (Spring Data JDBC, Spring Data JPA, Flyway, Bean Validation)
+**Frontend:** React 19 + Vite SPA
+**Database:** MySQL (`portfolio_manager`)
+
+---
+
+## 1. Purpose
+
+The system lets a user track investment holdings (stocks, ETFs, bonds, cash) inside a portfolio, pulling the live and historical prices from Yahoo Finance, view a dashboard of portfolio value/return/allocation, compare holding performance over selectable time ranges, and run risk analysis (volatility, max drawdown, concentration) against the portfolio. A portfolio summary can also be exported (dashboard + performance + risk combined into one response, and rendered client-side as a PDF).
+
+There is currently no login, registration, or multi-user concept — every endpoint operates directly on a `portfolioId` path variable with no authentication layer in front of it.
+
+---
+
+## 2. Architecture Overview
+
+```mermaid
+flowchart TB
+    subgraph Client["Frontend — React 19 + Vite SPA"]
+        FE["App.jsx tabs:\nDashboard · Holdings · Performance · Risk"]
+        PDF["jsPDF + jspdf-autotable\n(client-side PDF export)"]
+    end
+
+    subgraph API["Spring Boot application"]
+        CTRL["REST controllers\nDashboard / Holding / Instrument /\nMarketData / Performance / RiskAnalysis"]
+        SVC["Service layer\nbusiness logic & calculations"]
+        REPO["Repository layer\nSpring Data JPA"]
+    end
+
+    DB[(MySQL\nportfolio_manager)]
+
+    YF["Yahoo Finance\n(live price + historical close)"]
+
+    FE -->|"fetch, /api/*, JSON"| CTRL
+    FE --> PDF
+    CTRL --> SVC
+    SVC --> REPO
+    REPO --> DB
+    SVC -->|"YahooFinanceService"| YF
+```
+
+---
+
+## 3. Component Breakdown
+
+### 3.1 Frontend (`/frontend`)
+A single-page React app (Vite build, not statically-served HTML/JS):
+- `App.jsx` — holds the four-tab layout (`dashboard`, `holdings`, `performance`, `risk`) and the client-side PDF export logic
+- `lib/api.js` — fetch wrapper (`apiRequest`) plus one function per backend endpoint; base URL resolved from `VITE_API_BASE_URL`, defaulting to `/api`
+- `lib/portfolio.js` — frontend-side data shaping/helpers
+- `data/demoPortfolio.js` — a demo/fallback snapshot, presumably for offline/first-load display
+- Dependencies of note: `recharts` (charts), `lucide-react` (icons), `jspdf` + `jspdf-autotable` (client-generated PDF export)
+
+### 3.2 API layer (`Controller/`)
+| Controller | Base path | Responsibility |
+|---|---|---|
+| `DashboardController` | `/api/portfolio/{portfolioId}/dashboard` | dashboard cards, value-over-time, sector allocation, price refresh, summary export |
+| `HoldingController` | `/api/portfolio/{portfolioId}/holdings`, `/api/portfolio/holdings/{holdingId}` | list (paged), add, update quantity, delete holdings |
+| `InstrumentController` | `/api/instruments` | list all available instruments |
+| `MarketDataController` | `/api/market` | current price lookup and historical price import via Yahoo Finance |
+| `PerformanceController` | `/api/portfolio/{portfolioId}/performance` | best/worst summary, per-holding performance, top/worst performer time series |
+| `RiskAnalysisController` | `/api/risk` | portfolio volatility, max drawdown, concentration alerts |
+
+Endpoints are documented with springdoc/OpenAPI `@Tag`/`@Operation` annotations, so Swagger UI is available.
+
+### 3.3 Service layer (`Sevice/`)
+*(the package is spelled `Sevice` throughout the codebase, not `Service` — worth an eventual rename, but every import currently depends on this spelling)*
+
+- `HoldingService` / `HoldingServiceImpl` — holding CRUD, pagination
+- `InstrumentService` / `InstrumentServiceImple` — instrument lookup
+- `PerformanceService` / `PerformanceServiceImpl` — best/worst-performer summary, per-holding range return, rebased top/worst time series
+- `PortfolioAnalyticsService` / `PortfolioAnalyticsServiceImpl` — dashboard aggregation (value, return, allocation, cash) and price-refresh orchestration
+- `PortfolioSummaryExportService` — bundles dashboard + performance + risk into one `PortfolioSummaryExportResponse` for the export-summary endpoint
+- `PriceHistoryImportService` — pulls historical closes from `YahooFinanceService` and persists them to `price_history`
+- `RiskAnalysisService` — volatility (daily-return std dev, optionally annualized), max drawdown, concentration-threshold alerts; trailing 252-day lookback, minimum 20 data points before a metric is computed
+- `YahooFinanceService` — live price + historical close fetch via `RestTemplate`, with a 60-second in-memory cache for live prices
+
+### 3.4 Data layer (`Model/`, `Repository/`)
+Spring Data JPA repositories over MySQL:
+
+**Entities**
+- `Portfolio` — portfolioId, name, baseCurrency, createdAt
+- `Instrument` — instrumentId, ticker, name, assetClass (`STOCK`/`BOND`/`CASH`/`ETF`), sector, currency, exchange, createdAt
+- `Holding` — holdingId, portfolio (FK), instrument (FK, eager-fetched), quantity, avgCost, createdAt, updatedAt
+- `PriceHistory` — priceHistoryId, instrument (FK), priceDate, open/high/low/close, volume — unique on `(instrument_id, price_date)`
+
+**Repositories:** `PortfolioRepository`, `InstrumentRepository`, `HoldingRepository`, `PriceHistoryRepository`
+
+Schema is version-controlled via Flyway (`src/main/resources/db/migration/`): `V1__init_schema.sql`, `V2__align_existing_schema.sql`, `V3__add_price_history_table.sql`.
+
+### 3.5 DTOs (`dto/`)
+Request/response records decouple the API contract from entities — notably a rich set around performance and risk reporting:
+`AddHoldingRequest`, `UpdateHoldingQuantityRequest`, `HoldingResponse`, `InstrumentResponse`, `StockPriceResponse`, `DashboardResponse` (with nested `ValuePoint` / `AllocationSlice`), `PerformanceSummaryResponse`, `PerformerSnapshotResponse`, `HoldingPerformanceResponse`, `PerformanceComparisonResponse`, `PerformancePointResponse`, `PortfolioSummaryExportResponse` (with nested `RiskSummary` / `VolatilitySummary` / `ConcentrationAlertSummary`).
+
+---
+
+## 4. Data Flow (typical request)
+
+1. A tab in `App.jsx` calls a function in `lib/api.js`, which `fetch`es `{VITE_API_BASE_URL}/api/...`.
+2. The matching `@RestController` method receives the call (no security filter chain sits in front of it currently).
+3. The controller delegates to its service, which either:
+   - reads/writes holdings, instruments, or price history via the repository layer, and/or
+   - calls `YahooFinanceService` for a live price or historical series.
+4. For performance/risk endpoints, the service computes derived figures (returns, volatility, drawdown, concentration) from the fetched price series rather than storing them.
+5. The DTO is serialized to JSON and returned; the frontend renders it into the relevant tab, or — for the export flow — into a client-generated PDF via `jspdf`/`jspdf-autotable`.
+
+---
+
+## 5. Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Language / runtime | Java 21 |
+| Framework | Spring Boot 4.1.0 (Spring Data JDBC, Spring Data JPA, Bean Validation) |
+| Persistence | Spring Data JPA, MySQL (`mysql-connector-j`), Flyway (`flyway-mysql`) |
+| API docs | springdoc-openapi (Swagger UI), via `@Tag`/`@Operation` annotations |
+| Frontend | React 19, Vite 8 |
+| Frontend libraries | recharts (charts), lucide-react (icons), jsPDF + jspdf-autotable (PDF export) |
+| Boilerplate | Lombok (provided scope) |
+| Build tools | Maven (`mvnw`), npm/Vite (`frontend/`) |
+| External APIs | Yahoo Finance (live price + historical close) |
+
+---
+
+## 6. Deployment View
+
+- Single Spring Boot application (default port `8080`), connecting to a MySQL instance (`portfolio_manager` schema), migrated via Flyway on startup (`spring.flyway.baseline-on-migrate=true`, `spring.jpa.hibernate.ddl-auto=validate` — Flyway owns the schema, Hibernate only validates it matches).
+- Frontend is a separate Vite dev server / static build, pointed at the backend via `VITE_API_BASE_URL` (defaults to `/api`, implying a dev proxy or same-origin deploy).
+- No CORS configuration or security filter chain was found in the uploaded source — confirm before exposing this beyond localhost.
+
+---
+
+## 7. Notes for Review
+
+- **No authentication/authorization layer.** Every controller operates on `portfolioId` with no user/session concept — fine for a capstone demo, but flag explicitly if a customer expects multi-user support.
+- **Duplicate price-history model.** `Model.PriceHistory` + `Repository.PriceHistoryRepository` is the "real" one used by dashboard/performance/import services, but `RiskAnalysisService` depends on a second, separate entity/repository pair — `Model.Price_History` + `Repository.Price` — mapped to the *same* `price_history` table. They coexist rather than one calling the other; worth consolidating onto a single entity before this grows further, since two JPA entities backing one table is an easy source of stale-cache or mapping bugs.
+- **`config/InstrumentDataInitializer` is currently an empty `@Configuration` class** — either a stub left over from planning seed data, or dead code to remove.
+- **Package name `Sevice` (not `Service`)** is used consistently, so it's not breaking anything, but it's the kind of typo worth fixing in one clean commit before more files depend on it.
+- **DB credentials are in plaintext in `application.properties`** (checked into the repo, based on the uploaded source) — recommend moving to environment variables or a secrets manager, and rotating the password since it's currently visible in version control.
+- **`spring.jpa.show-sql=true`** is fine for local development but should be switched off (or set via a profile) before anything resembling a shared/staging environment.
+- **Two export paths exist for portfolio summary data**: the backend's `/dashboard/export-summary` endpoint (`PortfolioSummaryExportService`, bundling dashboard + performance + risk into one response) and the frontend's client-side `jsPDF` generation in `App.jsx`. Worth confirming with your team whether the frontend PDF actually consumes `export-summary`'s combined payload or re-fetches the three pieces separately — if the latter, that's a bit of redundant plumbing worth trimming.
+
