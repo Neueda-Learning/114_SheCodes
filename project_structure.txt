@@ -1,10 +1,19 @@
 Folder PATH listing for volume Windows
 Volume serial number is 7EC2-1A39
 C:.
+|   .dockerignore
+|   .env.example
 |   .gitattributes
 |   .gitignore
 |   dashboard.jpeg
 |   desc.md
+|   docker-compose.yml
+|   DOCKER.md
+|   Dockerfile
+|   holdings_past_history_import.csv
+|   holdings_past_history_import_guide.pdf
+|   Jenkinsfile
+|   JenkinsSetup.md
 |   Kanban-Board
 |   Meeting1
 |   Meeting2
@@ -31,10 +40,19 @@ C:.
 |   \---wrapper
 |           maven-wrapper.properties
 |           
++---.vite
+|   \---deps
+|           package.json
+|           _metadata.json
+|           
 +---frontend
+|   |   .dockerignore
 |   |   .gitignore
 |   |   .oxlintrc.json
+|   |   docker-compose.yml
+|   |   Dockerfile
 |   |   index.html
+|   |   nginx.conf
 |   |   package-lock.json
 |   |   package.json
 |   |   README.md
@@ -155,7 +173,11 @@ C:.
 |                   \---Portfolio_Manager
 |                       |   PortfolioManagerApplicationTests.java
 |                       |   
+|                       +---Controller
+|                       |       HoldingControllerTest.java
+|                       |       
 |                       \---Sevice
+|                               HoldingServiceImplTest.java
 |                               RiskAnalysisServiceTest.java
 |                               
 \---target
@@ -192,7 +214,13 @@ C:.
     |   |           |       PerformanceResponse.class
     |   |           |       PerformanceSummaryResponse.class
     |   |           |       PerformerSnapshotResponse.class
+    |   |           |       PortfolioSummaryExportResponse$ConcentrationAlertSummary.class
+    |   |           |       PortfolioSummaryExportResponse$HoldingVolatilitySummary.class
+    |   |           |       PortfolioSummaryExportResponse$RiskSummary.class
+    |   |           |       PortfolioSummaryExportResponse$VolatilitySummary.class
+    |   |           |       PortfolioSummaryExportResponse.class
     |   |           |       StockPriceResponse.class
+    |   |           |       UpdateHoldingQuantityRequest.class
     |   |           |       
     |   |           +---Model
     |   |           |       AssetClass.class
@@ -226,6 +254,7 @@ C:.
     |   |                   PortfolioAnalyticsService.class
     |   |                   PortfolioAnalyticsServiceImpl$PriceLookupResult.class
     |   |                   PortfolioAnalyticsServiceImpl.class
+    |   |                   PortfolioSummaryExportService.class
     |   |                   PriceHistoryImportService.class
     |   |                   RiskAnalysisService$ConcentrationAlert.class
     |   |                   RiskAnalysisService$HoldingVolatility.class
@@ -269,6 +298,10 @@ C:.
                 \---Portfolio_Manager
                     |   PortfolioManagerApplicationTests.class
                     |   
+                    +---Controller
+                    |       HoldingControllerTest.class
+                    |       
                     \---Sevice
+                            HoldingServiceImplTest.class
                             RiskAnalysisServiceTest.class
                             
