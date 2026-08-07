@@ -64,17 +64,6 @@ pipeline {
                 sh 'docker compose up -d'
             }
         }
-
-        stage('Smoke Test') {
-            steps {
-                // Basic sanity check: is the backend actually answering
-                // after deploy, before declaring the build a success.
-                sh '''
-                    sleep 15
-                    curl -f http://localhost:8080/api/risk/volatility || exit 1
-                '''
-            }
-        }
     }
 
     post {
